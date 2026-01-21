@@ -1,0 +1,4 @@
+.env
+.vscode/*
+results/*
+src/__pycache__/*

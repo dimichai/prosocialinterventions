@@ -1,3 +1,4 @@
+import argparse
 import dotenv
 import os
 import json
@@ -58,11 +59,12 @@ def select_users(persona_path, n):
 def run_simulation(simulation_size = 500, simulation_steps = 10000, 
                    user_link_strategy = "on_repost_bio", 
                    timeline_select_strategy = "random_weighted",
-                   show_info = True, run_nr = 1):
+                   show_info = True, run_nr = 1,
+                   personas_file = 'personas.json'):
 
 
     # Define the path to the persona file
-    persona_path = os.path.join(os.getcwd(), 'personas.json')
+    persona_path = os.path.join(os.getcwd(), personas_file)
     news_feed = NewsFeed('News_Category_Dataset_v3.json')
 
     filename = f"../results/{user_link_strategy}_{timeline_select_strategy}_{'info' if show_info else 'noinfo'}_{run_nr}"
@@ -80,39 +82,39 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
     [platform.register_user(Agent(model, user)) for user in selected_users]
     platform.set_client(client)
 
-    try:
-        for i in range(simulation_steps):
+    
+    for i in range(simulation_steps):
 
-            print(f"Simulation step {i + 1}")
+        print(f"Simulation step {i + 1}")
 
-            # Select a random user
-            user = platform.sample_user()
+        # Select a random user
+        user = platform.sample_user()
 
-            # Perform an action
-            action, prompt = user.perform_action(news_feed.get_random_news(10), platform.get_timeline(user.identifier, 10))
-            platform.parse_and_do_action(user.identifier, action, prompt)
+        # Perform an action
+        action, prompt = user.perform_action(news_feed.get_random_news(10), platform.get_timeline(user.identifier, 10))
+        platform.parse_and_do_action(user.identifier, action, prompt)
 
-            print(log_action(user, action))
+        print(log_action(user, action))
 
-            # Add snapshot of the platform for analysis
-            platform.add_snapshot()
+        # Add snapshot of the platform for analysis
+        platform.add_snapshot()
 
-            # Refresh client every 1000 steps
-            if i % 1000 == 0 and i != 0:
-                
-                new_client = OpenAI()
-                platform.set_client(new_client)
-                client.close()
+        # Refresh client every 1000 steps
+        if i % 1000 == 0 and i != 0:
+            
+            new_client = OpenAI()
+            platform.set_client(new_client)
+            client.close()
 
-                client = new_client
-    except:
-        json.dump(platform.generate_log(), open(filename + '.json', 'w'), indent=4, default=str)
+            client = new_client
+    # except:
+    #     json.dump(platform.generate_log(), open(filename + '.json', 'w'), indent=4, default=str)
 
-        # Set reuse of platform
-        platform.set_client(None)
-        client.close()
+    #     # Set reuse of platform
+    #     platform.set_client(None)
+    #     client.close()
 
-        pickle.dump(platform, open(filename + '.pkl', 'wb'))
+    #     pickle.dump(platform, open(filename + '.pkl', 'wb'))
 
     json.dump(platform.generate_log(), open(filename + '.json', 'w'), indent=4, default=str)
 
@@ -123,13 +125,17 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
     pickle.dump(platform, open(filename + '.pkl', 'wb'))
 
 if __name__ == "__main__":
-
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument("--personas_file", type=str, default='personas.json', help="Path to the personas file")   
+    args = argparser.parse_args()
+    
     # Run five simulations
-    for i in range(1, 6):
+    for i in range(1, 2):
 
         print(f"Running simulation {i}...")
 
-        run_simulation(simulation_size=500, simulation_steps=10000, 
-                       user_link_strategy="on_repost_bio", 
-                       timeline_select_strategy="other_partisan",
-                       show_info=True, run_nr=i)
+        run_simulation(simulation_size=500, simulation_steps=5000, 
+                    user_link_strategy="on_repost_bio", 
+                    timeline_select_strategy="other_partisan",
+                    show_info=True, run_nr=i,
+                    personas_file=args.personas_file)

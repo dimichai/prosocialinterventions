@@ -1,10 +1,12 @@
 import pandas as pd
 import json
+from datetime import datetime
 import openai
 import dotenv
 from pydantic import BaseModel
 from typing import List
 import random
+import argparse
 
 # Create response format
 class Response(BaseModel):
@@ -22,7 +24,7 @@ def format_list(words):
         return f"{formatted_words}, and {words[-1]}"
     
 # This code fetches lines from the ANES, and returns as readable dict
-def get_anes_rows(number_rows):
+def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=False, ignore_voted2020=False):
 
     df = pd.read_csv('anes_timeseries_2020_csv_20220210.csv', low_memory=False)
 
@@ -602,40 +604,42 @@ def get_anes_rows(number_rows):
 
         l['fishing'] = d['V202567']
 
-        if d['vote2020'] in ['Donald Trump','Joe Biden']:
-            l['persona'] += f"You voted for {d['vote2020']} in 2020.\n"
-            l['voted2020'] = True
-            l['voted2020_for'] = d['vote2020']
-        else:
-            l['persona'] += "You didn't vote in 2020.\n"
-            l['voted2020'] = False
-            
-        #Generate party affiliation
-        if l['partisan'] == 0:
-            l['persona'] += 'You prefer neither political party.\n'
-        if l['partisan'] < 0 and l['partisan'] > -0.2:
-            l['persona'] += 'You prefer the Democrats.\n'
-        if l['partisan'] > 0 and l['partisan'] < 0.2:
-            l['persona'] += 'You prefer the Republicans.\n'
-        if l['partisan'] <= -0.2 and l['partisan'] > -0.5:
-            l['persona'] += 'You are a Democrat.\n'
-        if l['partisan'] >= 0.2 and l['partisan'] < 0.5:
-            l['persona'] += 'You are a Republican.\n'
-        if l['partisan'] <= -0.5:
-            l['persona'] += 'You are a strong Democrat.\n'
-        if l['partisan'] >= 0.5:
-            l['persona'] += 'You are a strong Republican.\n'
+        if not ignore_voted2020:
+            if d['vote2020'] in ['Donald Trump','Joe Biden']:
+                l['persona'] += f"You voted for {d['vote2020']} in 2020.\n"
+                l['voted2020'] = True
+                l['voted2020_for'] = d['vote2020']
+            else:
+                l['persona'] += "You didn't vote in 2020.\n"
+                l['voted2020'] = False
+        if not ignore_party_identity:
+            #Generate party affiliation
+            if l['partisan'] == 0:
+                l['persona'] += 'You prefer neither political party.\n'
+            if l['partisan'] < 0 and l['partisan'] > -0.2:
+                l['persona'] += 'You prefer the Democrats.\n'
+            if l['partisan'] > 0 and l['partisan'] < 0.2:
+                l['persona'] += 'You prefer the Republicans.\n'
+            if l['partisan'] <= -0.2 and l['partisan'] > -0.5:
+                l['persona'] += 'You are a Democrat.\n'
+            if l['partisan'] >= 0.2 and l['partisan'] < 0.5:
+                l['persona'] += 'You are a Republican.\n'
+            if l['partisan'] <= -0.5:
+                l['persona'] += 'You are a strong Democrat.\n'
+            if l['partisan'] >= 0.5:
+                l['persona'] += 'You are a strong Republican.\n'
 
         l['justifiedViolence'] = d['justifiedViolence']
         
         if d['justifiedViolence'] in [3,4,5]:
             l['persona'] += "You think political violence is justified.\n"
 
-        if len(lovelist)>0:
-            l['persona'] += f'You love {format_list(lovelist)}.\n'
+        if not ignore_love_hate:
+            if len(lovelist)>0:
+                l['persona'] += f'You love {format_list(lovelist)}.\n'
 
-        if len(hatelist)>0:
-            l['persona'] += f'You hate {format_list(hatelist)}.\n'            
+            if len(hatelist)>0:
+                l['persona'] += f'You hate {format_list(hatelist)}.\n'            
 
 
         l['arguePolitics'] =d['V202545']== 1 or d['V202545']== 2
@@ -730,18 +734,29 @@ You may add things that are not in the persona. Do not use emoji. Write as if yo
 
 if __name__ == "__main__":
     
-    #Example usage
-    print(return_persona_string())
-
-    personas = get_anes_rows(2000)
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument("--num_personas", type=int, default=2000, help="Number of personas to generate")
+    argparser.add_argument("--ignore_love_hate", action='store_true', default=False, help="Whether to ignore love/hate lists")
+    argparser.add_argument("--ignore_party_identity", action='store_true', default=False, help="Whether to ignore party identity info")
+    argparser.add_argument("--ignore_voted2020", action='store_true', default=False, help="Whether to ignore voted2020 info")
+    args = argparser.parse_args()
     
-    json.dump(personas, open("personas.json","w"))
+    #Example usage
+    # print(return_persona_string())
 
-    dotenv.load_dotenv('../src/.env')
+    personas = get_anes_rows(args.num_personas, 
+                            ignore_love_hate=args.ignore_love_hate, 
+                            ignore_party_identity=args.ignore_party_identity, 
+                            ignore_voted2020=args.ignore_voted2020)
+    
+    personas_file_name = f"{datetime.now().strftime('%Y%m%d')}_personas_{args.num_personas}_{'noLoveHate_' if args.ignore_love_hate else ''}{'noPartyId_' if args.ignore_party_identity else ''}{'noVoted2020_' if args.ignore_voted2020 else ''}.json"
+    json.dump(personas, open(personas_file_name,"w"))
+
+    dotenv.load_dotenv('../.env')
 
     client = openai.OpenAI()
 
-    personas = json.load(open("personas.json"))
+    personas = json.load(open(personas_file_name))
     i=1
     for persona in personas:
         print(i)
@@ -751,4 +766,4 @@ if __name__ == "__main__":
         print(persona['biography'])
         print()
 
-    json.dump(personas, open("personas_with_bio.json","w"))
+    json.dump(personas, open(f"{datetime.now().strftime('%Y%m%d')}_personas_with_bio_{args.num_personas}_{'noLoveHate_' if args.ignore_love_hate else ''}{'noPartyId_' if args.ignore_party_identity else ''}{'noVoted2020_' if args.ignore_voted2020 else ''}.json","w"))

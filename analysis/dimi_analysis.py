@@ -9,7 +9,7 @@ import numpy as np
 from collections import Counter
 from analysis.analyse_multiple import gini_coefficient, EI_index, correlations, inequality
 
-log_dir = "../results/without_love_hate_lists"
+log_dir = "../results/without_love_hate_lists_and_voted2020"
 log_setting = "on_repost_bio_other_partisan_info"
 log_data = json.load(open(f'{log_dir}/{log_setting}_1.json'))
 
@@ -84,7 +84,9 @@ mean_number_reposts = np.mean([data['actions']['1'] for simulation, data in summ
 mean_number_posts = np.mean([data['actions']['2'] for simulation, data in summary_data.items()])
 
 #%% Compare different settings
-settings_to_compare = ['with_love_hate_lists', 'without_love_hate_lists']
+settings_to_compare = ['with_love_hate_lists', 'without_love_hate_lists', 'without_love_hate_lists_and_voted2020', 'without_love_hate_and_party_id']
+colors = ['#4878A8', '#E07B54', '#6ACC65', '#FFD92F']
+setting_labels = ['With Lists', 'Without Lists', 'Without Lists and Voted2020', 'Without Lists and Party ID']
 
 metrics_by_setting = {}
 for setting in settings_to_compare:
@@ -123,15 +125,11 @@ plt.rcParams.update({
     'axes.spines.right': False,
 })
 
-# Nature single column width: 89mm (~3.5in), double: 183mm (~7.2in)
-fig, axes = plt.subplots(1, len(metric_names), figsize=(7.2, 2.2))
+fig, axes = plt.subplots(1, len(metric_names), figsize=(14.2, 4.2))
 
 x = np.arange(len(settings_to_compare))
 width = 0.65
 
-# Professional color palette (colorblind-friendly)
-colors = ['#4878A8', '#E07B54']  # Muted blue and coral
-setting_labels = ['With Lists', 'Without Lists']
 
 for idx, (metric, label) in enumerate(zip(metric_names, metric_labels)):
     ax = axes[idx]

@@ -715,13 +715,20 @@ Please answer in the format I gave you. I will give you the persona now.
     persona['persona'] += f"Your occupation is {chosen_occupation}.\n"
     persona['persona'] += f"You like {format_list(chosen_hobbies_interests)}.\n"
 
-def add_biography(persona, client):
+def add_biography(persona, client, ignore_bio_love_hate=False, ignore_bio_party_identity=False, ignore_bio_voted2020=False):
 
     prompt = f"""Write a very short (max. 140 characters), very informal social media biography for the following persona: 
 
 {persona['persona']}
 
 You may add things that are not in the persona. Do not use emoji. Write as if you are the person described."""
+
+    if ignore_bio_love_hate:
+        prompt += "\nDo not include anything about things you love or hate."
+    if ignore_bio_party_identity:
+        prompt += "\nDo not include anything about your political party identity."
+    if ignore_bio_voted2020:
+        prompt += "\nDo not include anything about whether you voted in 2020."
     
     response = client.chat.completions.create(
         model="gpt-4o-mini",
@@ -739,6 +746,10 @@ if __name__ == "__main__":
     argparser.add_argument("--ignore_love_hate", action='store_true', default=False, help="Whether to ignore love/hate lists")
     argparser.add_argument("--ignore_party_identity", action='store_true', default=False, help="Whether to ignore party identity info")
     argparser.add_argument("--ignore_voted2020", action='store_true', default=False, help="Whether to ignore voted2020 info")
+    # Here, the parameters control what is added to the public bio of the agent. The persona generation always uses all info.
+    argparser.add_argument("--ignore_bio_love_hate", action='store_true', default=False, help="Whether to ignore love/hate lists in bio")
+    argparser.add_argument("--ignore_bio_party_identity", action='store_true', default=False, help="Whether to ignore party identity info in bio")
+    argparser.add_argument("--ignore_bio_voted2020", action='store_true', default=False, help="Whether to ignore voted2020 info in bio")
     args = argparser.parse_args()
     
     #Example usage
@@ -766,4 +777,15 @@ if __name__ == "__main__":
         print(persona['biography'])
         print()
 
-    json.dump(personas, open(f"{datetime.now().strftime('%Y%m%d')}_personas_with_bio_{args.num_personas}_{'noLoveHate_' if args.ignore_love_hate else ''}{'noPartyId_' if args.ignore_party_identity else ''}{'noVoted2020_' if args.ignore_voted2020 else ''}.json","w"))
+    filename = (
+        f"{datetime.now().strftime('%Y%m%d')}_personas_with_bio_{args.num_personas}_"
+        f"{'noLoveHate_' if args.ignore_love_hate else ''}"
+        f"{'noPartyId_' if args.ignore_party_identity else ''}"
+        f"{'noVoted2020_' if args.ignore_voted2020 else ''}"
+        f"{'noBioLoveHate_' if args.ignore_bio_love_hate else ''}"
+        f"{'noBioPartyId_' if args.ignore_bio_party_identity else ''}"
+        f"{'noBioVoted2020_' if args.ignore_bio_voted2020 else ''}"
+        ".json"
+    )
+    with open(filename, "w") as f:
+        json.dump(personas, f)

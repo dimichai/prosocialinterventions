@@ -104,41 +104,41 @@ def inequality(data):
         "std_reposts": np.std([post['reposts'] for post in sorted_posts]),
     }
 
-all_files = [
-    "on_repost_bio_random_weighted_info",
-    "on_repost_bio_bridging_attributes_info",
-    "on_repost_bio_chronological_info",
-    "on_repost_bio_random_info",
-    "on_repost_bio_random_weighted_noinfo",
-    "on_repost_bio_random_weighted_reversed_info",
-    "on_repost_posts_random_weighted_info"
-]
+# all_files = [
+#     "on_repost_bio_random_weighted_info",
+#     "on_repost_bio_bridging_attributes_info",
+#     "on_repost_bio_chronological_info",
+#     "on_repost_bio_random_info",
+#     "on_repost_bio_random_weighted_noinfo",
+#     "on_repost_bio_random_weighted_reversed_info",
+#     "on_repost_posts_random_weighted_info"
+# ]
 
-all_files = ['on_repost_bio_other_partisan_info']
+# all_files = ['on_repost_bio_other_partisan_info']
 
-for file_to_analyze in all_files:
+# for file_to_analyze in all_files:
 
-    for i in range(1, 6):
+#     for i in range(1, 6):
 
-        f = open(f"../results/{file_to_analyze}_{i}.json", "r")
-        data = json.load(f)
+#         f = open(f"../results/{file_to_analyze}_{i}.json", "r")
+#         data = json.load(f)
 
-        follower_distribution = [user['followers'] for user in data['users']]
-        repost_distribution = [post['reposts'] for post in data['raw_posts']]
+#         follower_distribution = [user['followers'] for user in data['users']]
+#         repost_distribution = [post['reposts'] for post in data['raw_posts']]
         
 
-        output_data[f"simulation_{i}"] = {
-            "gini_coefficient_followers": gini_coefficient(follower_distribution),
-            "gini_coefficient_reposts": gini_coefficient(repost_distribution),
-            "EI_index": EI_index(data),
-            "correlations": correlations(data),
-            "actions": Counter([action['action'] for action in data['actions']]),
-            "inequality": inequality(data),
-        }
+#         output_data[f"simulation_{i}"] = {
+#             "gini_coefficient_followers": gini_coefficient(follower_distribution),
+#             "gini_coefficient_reposts": gini_coefficient(repost_distribution),
+#             "EI_index": EI_index(data),
+#             "correlations": correlations(data),
+#             "actions": Counter([action['action'] for action in data['actions']]),
+#             "inequality": inequality(data),
+#         }
 
-        f.close()
+#         f.close()
 
-        print(output_data[f"simulation_{i}"])
+#         print(output_data[f"simulation_{i}"])
 
-    with open(f"../results/{file_to_analyze}_summary.json", "w") as f:
-        json.dump(output_data, f, indent=4)
+#     with open(f"../results/{file_to_analyze}_summary.json", "w") as f:
+#         json.dump(output_data, f, indent=4)

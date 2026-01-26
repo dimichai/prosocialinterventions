@@ -139,7 +139,7 @@ for idx, (metric, label) in enumerate(zip(metric_names, metric_labels)):
 
     ax.set_title(label, fontweight='medium', pad=8)
     ax.set_xticks(x)
-    ax.set_xticklabels(setting_labels, rotation=0, ha='center')
+    ax.set_xticklabels(setting_labels, rotation=45, ha='right', rotation_mode='anchor')
 
     # Subtle zero line
     ax.axhline(y=0, color='#333333', linestyle='-', linewidth=0.5)

@@ -760,7 +760,16 @@ if __name__ == "__main__":
                             ignore_party_identity=args.ignore_party_identity, 
                             ignore_voted2020=args.ignore_voted2020)
     
-    personas_file_name = f"{datetime.now().strftime('%Y%m%d')}_personas_{args.num_personas}_{'noLoveHate_' if args.ignore_love_hate else ''}{'noPartyId_' if args.ignore_party_identity else ''}{'noVoted2020_' if args.ignore_voted2020 else ''}.json"
+    personas_file_name = (
+        f"{datetime.now().strftime('%Y%m%d')}_personas_{args.num_personas}_"
+        f"{'noLoveHate_' if args.ignore_love_hate else ''}"
+        f"{'noPartyId_' if args.ignore_party_identity else ''}"
+        f"{'noVoted2020_' if args.ignore_voted2020 else ''}"
+        f"{'noBioLoveHate_' if args.ignore_bio_love_hate else ''}"
+        f"{'noBioPartyId_' if args.ignore_bio_party_identity else ''}"
+        f"{'noBioVoted2020_' if args.ignore_bio_voted2020 else ''}"
+        ".json"
+    )
     json.dump(personas, open(personas_file_name,"w"))
 
     dotenv.load_dotenv('../.env')

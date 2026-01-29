@@ -1,10 +1,12 @@
 import argparse
+from datetime import datetime
 import dotenv
 import os
 import json
 import pickle
 import random
 
+from pathlib import Path
 from openai import OpenAI
 
 from Agent import Agent
@@ -59,7 +61,7 @@ def select_users(persona_path, n):
 def run_simulation(simulation_size = 500, simulation_steps = 10000, 
                    user_link_strategy = "on_repost_bio", 
                    timeline_select_strategy = "random_weighted",
-                   show_info = True, run_nr = 1,
+                   show_info = True, sim_path="",
                    personas_file = 'personas.json'):
 
 
@@ -67,7 +69,7 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
     persona_path = os.path.join(os.getcwd(), personas_file)
     news_feed = NewsFeed('News_Category_Dataset_v3.json')
 
-    filename = f"../results/{user_link_strategy}_{timeline_select_strategy}_{'info' if show_info else 'noinfo'}_{run_nr}"
+    filename = f"{sim_path}"
 
     platform = Platform(user_link_strategy=user_link_strategy, timeline_select_strategy=timeline_select_strategy, show_info=show_info)
     
@@ -126,16 +128,19 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser()
-    argparser.add_argument("--personas_file", type=str, default='personas.json', help="Path to the personas file")   
+    argparser.add_argument("--personas_file", type=str, default='personas.json', help="Path to the personas file")  
+    argparser.add_argument("--user_link_strategy", type=str, default='on_repost_bio', help="User link strategy for the simulation")
+    argparser.add_argument("--timeline_select_strategy", type=str, default='other_partisan', help="Timeline selection strategy for the simulation") 
     args = argparser.parse_args()
     
-    # Run five simulations
-    for i in range(1, 2):
+    sim_dir = f"../results/{args.personas_file.split('.')[0]}_{args.user_link_strategy}_{args.timeline_select_strategy}"
+    sim_run = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    sim_path = Path(sim_dir, sim_run)
+    os.makedirs(sim_dir, exist_ok=True)
+    print(f"Running simulation {sim_path}...")
 
-        print(f"Running simulation {i}...")
-
-        run_simulation(simulation_size=500, simulation_steps=5000, 
-                    user_link_strategy="on_repost_bio", 
-                    timeline_select_strategy="other_partisan",
-                    show_info=True, run_nr=i,
-                    personas_file=args.personas_file)
+    run_simulation(simulation_size=10, simulation_steps=10, 
+                user_link_strategy=args.user_link_strategy, 
+                timeline_select_strategy=args.timeline_select_strategy,
+                show_info=True, sim_path=sim_path,
+                personas_file=args.personas_file)

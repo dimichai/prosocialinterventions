@@ -62,8 +62,8 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
                    user_link_strategy = "on_repost_bio", 
                    timeline_select_strategy = "random_weighted",
                    show_info = True, sim_path="",
-                   personas_file = 'personas.json'):
-
+                   personas_file = 'personas.json',
+                   openrouter_api_key = None):
 
     # Define the path to the persona file
     persona_path = os.path.join(os.getcwd(), personas_file)
@@ -78,7 +78,15 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
 
     # Set client for platform to OpenAI gpt-4o-mini
     model = "gpt-4o-mini"
-    client = OpenAI()
+    if openrouter_api_key is not None:
+        client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=os.getenv(f"OPENROUTER_API_KEY_{openrouter_api_key}"),
+        )
+    else:
+        client = OpenAI(
+            api_key=os.getenv("OPENAI_API_KEY")
+        )
 
     # Register users
     [platform.register_user(Agent(model, user)) for user in selected_users]
@@ -104,7 +112,10 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
         # Refresh client every 1000 steps
         if i % 1000 == 0 and i != 0:
             
-            new_client = OpenAI()
+            new_client = OpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=os.getenv(f"OPENROUTER_API_KEY_{openrouter_api_key}"),
+            )
             platform.set_client(new_client)
             client.close()
 
@@ -131,6 +142,7 @@ if __name__ == "__main__":
     argparser.add_argument("--personas_file", type=str, default='personas.json', help="Path to the personas file")  
     argparser.add_argument("--user_link_strategy", type=str, default='on_repost_bio', help="User link strategy for the simulation")
     argparser.add_argument("--timeline_select_strategy", type=str, default='other_partisan', help="Timeline selection strategy for the simulation") 
+    argparser.add_argument("--openrouter_api_key", type=int, default=None, help="If None, use OpenAI key, Which OpenRouter API key to use from env (1, 2, or 3)")
     args = argparser.parse_args()
     
     sim_dir = f"../results/{args.personas_file.split('.')[0]}_{args.user_link_strategy}_{args.timeline_select_strategy}"
@@ -139,8 +151,9 @@ if __name__ == "__main__":
     os.makedirs(sim_dir, exist_ok=True)
     print(f"Running simulation {sim_path}...")
 
-    run_simulation(simulation_size=10, simulation_steps=10, 
+    run_simulation(simulation_size=500, simulation_steps=5000,
                 user_link_strategy=args.user_link_strategy, 
                 timeline_select_strategy=args.timeline_select_strategy,
                 show_info=True, sim_path=sim_path,
-                personas_file=args.personas_file)
+                personas_file=args.personas_file,
+                openrouter_api_key=args.openrouter_api_key)

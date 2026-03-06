@@ -10,7 +10,8 @@ from pydantic import BaseModel
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-personas_setting = 'personas'
+# personas_setting = 'personas'
+personas_setting = '20260123_personas_with_bio_2000_noLoveHate_noPartyId_'
 PERSONAS_FILE = os.path.join(os.path.dirname(__file__), f"../src/{personas_setting}.json")
 OUTPUT_FILE   = os.path.join(os.path.dirname(__file__), f"persona_interview_results_{personas_setting}.csv")
 MODEL         = "gpt-4o-mini"
@@ -146,3 +147,117 @@ fig.suptitle("Yes/No answers by party", fontsize=11)
 plt.tight_layout()
 plt.savefig(OUTPUT_FILE.replace(".csv", "_by_party.png"), bbox_inches="tight", dpi=150)
 plt.show()
+
+#%%
+
+COMPARISON_FILES = {
+    "Full Persona":            os.path.join(os.path.dirname(__file__), "persona_interview_results_personas.csv"),
+    "No Love/Hate": os.path.join(os.path.dirname(__file__), "persona_interview_results_20260121_personas_with_bio_2000_noLoveHate_.csv"),
+    "No Love/Hate & PartyId": os.path.join(os.path.dirname(__file__), "persona_interview_results_20260123_personas_with_bio_2000_noLoveHate_noPartyId_.csv"),
+    "No Love/Hate, PartyId, & Vot. Beh.": os.path.join(os.path.dirname(__file__), "persona_interview_results_20260227_personas_with_bio_2000_noLoveHate_noPartyId_noVoted2020_.csv"),
+}
+COMPARISON_OUTPUT_SLOPE = os.path.join(os.path.dirname(__file__), "interview_results.pdf")
+
+plt.rcParams.update({
+    'font.family': 'sans-serif',
+    'font.sans-serif': ['Lato', 'Arial', 'DejaVu Sans'],
+    'font.size': 8,
+    'axes.titlesize': 9,
+    'axes.labelsize': 8,
+    'xtick.labelsize': 7,
+    'ytick.labelsize': 7,
+    'axes.linewidth': 0.8,
+    'xtick.major.width': 0.8,
+    'ytick.major.width': 0.8,
+    'xtick.major.size': 3,
+    'ytick.major.size': 3,
+    'axes.spines.top': False,
+    'axes.spines.right': False,
+})
+
+def load_and_prepare(path: str) -> pd.DataFrame:
+    df = pd.read_csv(path)
+    for k, _ in QUESTIONS:
+        col = f"{k}_answer"
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.strip().str.lower().eq("true").astype(int)
+    return df
+
+dfs = {label: load_and_prepare(path) for label, path in COMPARISON_FILES.items()}
+
+answer_cols = ['q1_answer', 'q2_answer', 'q4_answer']
+question_labels = {
+    'q1': "Would you follow\nan opposing-party member?",
+    'q2': "Would you follow\nsomeone who loves Trump?",
+    'q4': "Would you follow\nsomeone who loves Biden?",
+}
+question_texts = {k: t for k, t in QUESTIONS}
+
+all_parties = sorted(set().union(*[set(df["party"].dropna().unique()) for df in dfs.values()]))
+labels      = list(dfs.keys())
+n_questions = len(answer_cols)
+n_datasets  = len(labels)
+x_ticks     = list(range(n_datasets))
+
+party_colors = {p: c for p, c in zip(all_parties, ["#03357D", "#888888", "#D50403", "#58508D", "#FFA600"])}
+
+# Per-panel nudges for rightmost label: {col: {party: y_offset}}
+right_nudge = {"q1_answer": {"Democrat": -0.04}}
+
+# Right margin to accommodate party labels
+right_margin = 1.6
+
+fig, axes = plt.subplots(1, n_questions, figsize=(6.4, 3.2), sharey=True)
+if n_questions == 1:
+    axes = [axes]
+
+for ax_idx, (ax, col) in enumerate(zip(axes, answer_cols)):
+    r_nudges = right_nudge.get(col, {})
+    for party in all_parties:
+        vals = [
+            dfs[label][dfs[label]["party"] == party][col].mean()
+            if party in dfs[label]["party"].values else float("nan")
+            for label in labels
+        ]
+        color = party_colors.get(party, "#888888")
+        ax.plot(x_ticks, vals, marker="o", color=color, linewidth=1.5,
+                markersize=4, solid_capstyle="round", clip_on=False)
+        if not pd.isna(vals[-1]):
+            ax.text(n_datasets - 1 + 0.12, vals[-1] + r_nudges.get(party, 0), party,
+                    ha="left", va="center", fontsize=6.5, color=color)
+
+    key = col.replace("_answer", "")
+    ax.set_title(question_labels.get(key, question_texts.get(key, col)),
+                 fontweight='medium', pad=6)
+    ax.set_xticks(x_ticks)
+    ax.set_xticklabels(labels, rotation=30, ha='right', rotation_mode='anchor')
+    ax.set_xlim(-0.4, n_datasets - 1 + right_margin)
+    ax.set_ylim(0, 1)
+    ax.yaxis.set_major_locator(plt.MaxNLocator(5))
+    ax.yaxis.grid(True, linestyle='-', alpha=0.15, color='#333333')
+    ax.set_axisbelow(True)
+
+axes[0].set_ylabel("Fraction answering Yes")
+fig.tight_layout(pad=1.2)
+fig.savefig(COMPARISON_OUTPUT_SLOPE, dpi=300, bbox_inches='tight', facecolor='white')
+fig.savefig(COMPARISON_OUTPUT_SLOPE.replace('.pdf', '.png'), dpi=300, bbox_inches='tight', facecolor='white')
+plt.show()
+print(f"Saved to {COMPARISON_OUTPUT_SLOPE}")
+
+#%%
+for label, df in dfs.items():
+    print(f"\n{'='*60}")
+    print(f"  {label}")
+    print(f"{'='*60}")
+    for col in answer_cols:
+        key = col.replace("_answer", "")
+        q_text = question_labels.get(key, question_texts.get(key, col)).replace("\n", " ")
+        print(f"\n  {q_text}")
+        for party in all_parties:
+            subset = df[df["party"] == party]
+            if len(subset) == 0:
+                continue
+            pct = subset[col].mean() * 100
+            print(f"    {party:<30} {pct:5.1f}%  (n={len(subset)})")
+
+# %%

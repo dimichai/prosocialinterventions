@@ -3,3 +3,4 @@
 results/*
 src/__pycache__/*
 analysis/__pycache__/*
+src/wandb/*

@@ -24,6 +24,67 @@ from analysis.analyse_multiple import gini_coefficient, EI_index, correlations
 
 dotenv.load_dotenv()
 
+def compute_metrics(platform, step, cost_input, cost_output, cost_cached, compute_clustering=False):
+    log_start_time = time.time()
+    follower_distribution = [u.followers for u in platform.users]
+    repost_distribution = [p.reposts for p in platform.raw_posts]
+    action_counts = Counter([a['action'] for a in platform.actions])
+
+    metrics = {"step": step}
+
+    # EI index
+    if len(platform.user_links) > 0:
+        IL = sum(1 for u1, u2 in platform.user_links
+                if platform.get_user(u1).persona['party'] == platform.get_user(u2).persona['party'])
+        EL = len(platform.user_links) - IL
+        metrics["EI_index"] = (EL - IL) / (EL + IL)
+
+    # Gini coefficients
+    if sum(follower_distribution) > 0:
+        metrics["gini_followers"] = gini_coefficient(follower_distribution)
+    if repost_distribution and sum(repost_distribution) > 0:
+        metrics["gini_reposts"] = gini_coefficient(repost_distribution)
+
+    # Correlations (partisanship vs followers/retweets)
+    if len(platform.raw_posts) > 0:
+        partisans = [abs(u.persona['partisan']) for u in platform.users]
+        corr_followers = np.corrcoef(partisans, follower_distribution)[0, 1]
+        total_retweets = [sum(p.reposts for p in platform.raw_posts if p.author.identifier == u.identifier) for u in platform.users]
+        corr_retweets = np.corrcoef(partisans, total_retweets)[0, 1]
+        metrics["correlation_followers_partisan"] = corr_followers
+        metrics["correlation_retweets_partisan"] = corr_retweets
+
+    # Summary stats
+    metrics["num_connections"] = len(platform.user_links)
+    metrics["num_posts"] = len(platform.raw_posts)
+    metrics["mean_followers"] = np.mean(follower_distribution)
+    metrics["mean_reposts"] = np.mean(repost_distribution) if repost_distribution else 0
+
+    # Estimated cost
+    total_input = sum(u.used_tokens_input for u in platform.users)
+    total_output = sum(u.used_tokens_output for u in platform.users)
+    total_cached = sum(u.used_tokens_cached for u in platform.users)
+    metrics["estimated_cost"] = ((cost_output / 1e6) * total_output) + \
+        ((cost_input / 1e6) * (total_input - total_cached)) + \
+        ((cost_cached / 1e6) * total_cached)
+    metrics["total_tokens_input"] = total_input
+    metrics["total_tokens_output"] = total_output
+
+    # Clustering coefficient
+    if len(platform.user_links) > 0 and compute_clustering:
+        G = nx.DiGraph()
+        G.add_nodes_from([u.identifier for u in platform.users])
+        G.add_edges_from(platform.user_links)
+        cluster_coeff = nx.clustering(G)
+        metrics["avg_clustering_coefficient"] = np.mean(list(cluster_coeff.values()))
+
+    # Action distribution
+    for action_type, count in action_counts.items():
+        metrics[f"action_{action_type}"] = count
+
+    metrics["seconds_to_log"] = time.time() - log_start_time
+    return metrics
+
 def log_action(user, action):
     """
     Log the action taken by the user to the console.
@@ -156,64 +217,7 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
         platform.add_snapshot()
         
         if log:
-            log_start_time = time.time()
-            follower_distribution = [u.followers for u in platform.users]
-            repost_distribution = [p.reposts for p in platform.raw_posts]
-            action_counts = Counter([a['action'] for a in platform.actions])
-
-            metrics = {"step": i + 1}
-
-            # EI index
-            if len(platform.user_links) > 0:
-                IL = sum(1 for u1, u2 in platform.user_links
-                        if platform.get_user(u1).persona['party'] == platform.get_user(u2).persona['party'])
-                EL = len(platform.user_links) - IL
-                metrics["EI_index"] = (EL - IL) / (EL + IL)
-
-            # Gini coefficients
-            if sum(follower_distribution) > 0:
-                metrics["gini_followers"] = gini_coefficient(follower_distribution)
-            if repost_distribution and sum(repost_distribution) > 0:
-                metrics["gini_reposts"] = gini_coefficient(repost_distribution)
-
-            # Correlations (partisanship vs followers/retweets)
-            if len(platform.raw_posts) > 0:
-                partisans = [abs(u.persona['partisan']) for u in platform.users]
-                corr_followers = np.corrcoef(partisans, follower_distribution)[0, 1]
-                total_retweets = [sum(p.reposts for p in platform.raw_posts if p.author.identifier == u.identifier) for u in platform.users]
-                corr_retweets = np.corrcoef(partisans, total_retweets)[0, 1]
-                metrics["correlation_followers_partisan"] = corr_followers
-                metrics["correlation_retweets_partisan"] = corr_retweets
-
-            # Summary stats
-            metrics["num_connections"] = len(platform.user_links)
-            metrics["num_posts"] = len(platform.raw_posts)
-            metrics["mean_followers"] = np.mean(follower_distribution)
-            metrics["mean_reposts"] = np.mean(repost_distribution) if repost_distribution else 0
-
-            # Estimated cost
-            total_input = sum(u.used_tokens_input for u in platform.users)
-            total_output = sum(u.used_tokens_output for u in platform.users)
-            total_cached = sum(u.used_tokens_cached for u in platform.users)
-            metrics["estimated_cost"] = ((cost_output / 1e6) * total_output) + \
-                ((cost_input / 1e6) * (total_input - total_cached)) + \
-                ((cost_cached / 1e6) * total_cached)
-            metrics["total_tokens_input"] = total_input
-            metrics["total_tokens_output"] = total_output
-
-            # Clustering coefficient (computed every 100 steps)
-            if len(platform.user_links) > 0 and i % 100 == 0:
-                G = nx.DiGraph()
-                G.add_nodes_from([u.identifier for u in platform.users])
-                G.add_edges_from(platform.user_links)
-                cluster_coeff = nx.clustering(G)
-                metrics["avg_clustering_coefficient"] = np.mean(list(cluster_coeff.values()))
-
-            # Action distribution
-            for action_type, count in action_counts.items():
-                metrics[f"action_{action_type}"] = count
-
-            metrics["seconds_to_log"] = time.time() - log_start_time
+            metrics = compute_metrics(platform, i + 1, cost_input, cost_output, cost_cached, compute_clustering=(i % 100 == 0))
             wandb.log(metrics)
 
         # Refresh client every 1000 steps
@@ -249,6 +253,10 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
 
     # Save current state of the platform to wandb
     if log:
+        final_metrics = compute_metrics(platform, simulation_steps, cost_input, cost_output, cost_cached, compute_clustering=True)
+        for key, value in final_metrics.items():
+            wandb.summary[f"final/{key}"] = value
+
         artifact = wandb.Artifact(
             name=f"platform-{sim_path.stem}",
             type="platform",

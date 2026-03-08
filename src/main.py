@@ -201,8 +201,8 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
             metrics["total_tokens_input"] = total_input
             metrics["total_tokens_output"] = total_output
 
-            # Clustering coefficient
-            if len(platform.user_links) > 0:
+            # Clustering coefficient (computed every 100 steps)
+            if len(platform.user_links) > 0 and i % 100 == 0:
                 G = nx.DiGraph()
                 G.add_nodes_from([u.identifier for u in platform.users])
                 G.add_edges_from(platform.user_links)

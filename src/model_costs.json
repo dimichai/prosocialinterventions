@@ -8,5 +8,10 @@
         "input": 0.10,
         "output": 0.40,
         "cached_input": 0.01
+    },
+    "mistralai/mistral-small-3.2-24b-instruct":{
+        "input": 0.06,
+        "output": 0.12,
+        "cached_input": 0.06
     }
 }

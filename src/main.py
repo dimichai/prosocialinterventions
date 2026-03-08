@@ -99,6 +99,19 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
             }
         )
 
+    costs_path = os.path.join(os.path.dirname(__file__), "model_costs.json")
+    with open(costs_path, "r") as f:
+        model_costs = json.load(f)
+    if llm_model not in model_costs:
+        print(f"Warning: No cost data for model '{llm_model}' in model_costs.json. Cost estimates will be 0.")
+        cost_input = 0.0
+        cost_output = 0.0
+        cost_cached = 0.0
+    else:
+        cost_input = model_costs[llm_model]["input"]
+        cost_output = model_costs[llm_model]["output"]
+        cost_cached = model_costs[llm_model]["cached_input"]
+
     # Define the path to the persona file
     persona_path = os.path.join(os.getcwd(), personas_file)
     news_feed = NewsFeed(news_feed)
@@ -178,13 +191,13 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
             metrics["mean_followers"] = np.mean(follower_distribution)
             metrics["mean_reposts"] = np.mean(repost_distribution) if repost_distribution else 0
 
-            # Estimated cost so far (OpenAI pricing)
+            # Estimated cost
             total_input = sum(u.used_tokens_input for u in platform.users)
             total_output = sum(u.used_tokens_output for u in platform.users)
             total_cached = sum(u.used_tokens_cached for u in platform.users)
-            metrics["estimated_cost"] = ((0.6 / 1e6) * total_output) + \
-                ((0.15 / 1e6) * (total_input - total_cached)) + \
-                ((0.075 / 1e6) * total_cached)
+            metrics["estimated_cost"] = ((cost_output / 1e6) * total_output) + \
+                ((cost_input / 1e6) * (total_input - total_cached)) + \
+                ((cost_cached / 1e6) * total_cached)
             metrics["total_tokens_input"] = total_input
             metrics["total_tokens_output"] = total_output
 

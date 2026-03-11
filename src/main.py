@@ -69,6 +69,7 @@ def compute_metrics(platform, step, cost_input, cost_output, cost_cached, comput
         ((cost_cached / 1e6) * total_cached)
     metrics["total_tokens_input"] = total_input
     metrics["total_tokens_output"] = total_output
+    metrics["total_tokens_cached"] = total_cached
 
     # Clustering coefficient
     if len(platform.user_links) > 0 and compute_clustering:

@@ -16,7 +16,7 @@ from openai import OpenAI
 from Agent import Agent
 from Platform import Platform
 from NewsFeed import NewsFeed
-
+import tempfile
 import networkx as nx
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -248,22 +248,22 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
     platform.set_client(None)
     client.close()
 
-    # Save platform pickle and log as wandb artifact
-    pkl_path = filename + '.pkl'
-    pickle.dump(platform, open(pkl_path, 'wb'))
-
     # Save current state of the platform to wandb
     if log:
         final_metrics = compute_metrics(platform, simulation_steps, cost_input, cost_output, cost_cached, compute_clustering=True)
         for key, value in final_metrics.items():
             wandb.summary[f"final/{key}"] = value
 
-        artifact = wandb.Artifact(
-            name=f"platform-{sim_path.stem}",
-            type="platform",
-        )
-        artifact.add_file(pkl_path)
-        wandb.log_artifact(artifact)
+        # Save platform pickle as a temporary file and upload as wandb artifact
+        with tempfile.NamedTemporaryFile(suffix='.pkl', delete=True) as tmp:
+            pickle.dump(platform, tmp)
+            tmp.flush()
+            artifact = wandb.Artifact(
+                name=f"platform-{sim_path.stem}",
+                type="platform",
+            )
+            artifact.add_file(tmp.name, name=f"{sim_path.stem}.pkl")
+            wandb.log_artifact(artifact)
         wandb.finish()
 
 if __name__ == "__main__":

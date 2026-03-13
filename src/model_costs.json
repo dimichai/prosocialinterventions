@@ -18,5 +18,15 @@
         "input": 0.10,
         "output": 0.32,
         "cached_input": 0.0
+    },
+    "qwen/qwen3.5-9b": {
+        "input": 0.10,
+        "output": 0.15,
+        "cached_input": 0.0
+    },
+    "anthropic/claude-3-haiku": {
+        "input": 0.25,
+        "output": 1.25,
+        "cached_input": 0.03
     }
 }

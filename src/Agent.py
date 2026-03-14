@@ -211,4 +211,9 @@ Reply in JSON format.\n\n"""
             print(f"Error: {e}")
             return Action(option=-1, content="", explanation=str(e)), msg
 
-        return response.message.parsed, msg
+        parsed = response.message.parsed
+        if parsed is None:
+            print(f"Warning: Failed to parse action response. Raw content: {response.message.content}")
+            return Action(option=-1, content="", explanation="Failed to parse response"), msg
+
+        return parsed, msg

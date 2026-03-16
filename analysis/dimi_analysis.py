@@ -1,8 +1,14 @@
 #%%
+import sys
+sys.path.insert(0, '../src')
+
+import pickle
 import matplotlib.pyplot as plt
+import networkx as nx
 import numpy as np
 import wandb
 from collections import defaultdict
+from pathlib import Path
 
 # Keyed by persona file suffix. 'group' determines which plot row(s) the setting appears in.
 settings_config = {
@@ -29,17 +35,17 @@ settings_config = {
     'noLoveHate_.json': {
         'color': '#2D7D2D',
         'label': 'No AP',
-        'group': 'list',
+        'group': 'persona',
     },
     'noLoveHate_noPartyId_.json': {
         'color': '#5AAD5A',
         'label': 'No AP & PID',
-        'group': 'list',
+        'group': 'persona',
     },
     'noLoveHate_noPartyId_noVoted2020_.json': {
         'color': '#8DD38D',
         'label': 'No AP & PID & VB',
-        'group': 'list',
+        'group': 'persona',
     },
 }
 
@@ -148,7 +154,7 @@ for model_name in MODEL_NAMES:
                 wandb_metrics[setting][f'{metric}_se'] = np.nan
 
     bio_keys = [k for k in settings_config if settings_config[k]['group'] in ('both', 'bio') and k in wandb_metrics]
-    list_keys = [k for k in settings_config if settings_config[k]['group'] in ('both', 'list') and k in wandb_metrics]
+    list_keys = [k for k in settings_config if settings_config[k]['group'] in ('both', 'persona') and k in wandb_metrics]
     n_rows = (1 if bio_keys else 0) + (1 if list_keys else 0)
 
     if n_rows == 0:
@@ -167,10 +173,83 @@ for model_name in MODEL_NAMES:
         plot_metrics_comparison(axes[row], list_keys, data=wandb_metrics)
 
     safe_name = model_name.replace("/", "_")
-    fig.suptitle(model_name, fontsize=10, fontweight='medium')
+    # fig.suptitle(model_name, fontsize=10, fontweight='medium')
     fig.tight_layout(pad=1.2, h_pad=3.5)
     fig.savefig(f'metrics_comparison_{safe_name}.pdf', dpi=300, bbox_inches='tight', facecolor='white')
     fig.savefig(f'metrics_comparison_{safe_name}.png', dpi=300, bbox_inches='tight', facecolor='white')
     plt.show()
     print(f"  Saved metrics_comparison_{safe_name}.pdf/png")
+
+#%% Download platform artifacts from wandb and plot networks
+
+PARTY_COLORS = {
+    'Democrat': '#4878A8',
+    'Republican': '#D45500',
+}
+
+NETWORK_MODEL = "gpt-4o-mini"
+NETWORK_GROUP = "persona"
+
+api = wandb.Api()
+runs = api.runs(
+    "prosocial-interventions",
+    filters={"config.llm_model": NETWORK_MODEL},
+)
+
+# Pick the first run for each persona file setting
+runs_by_setting = {}
+for run in runs:
+    personas_file = run.config.get("personas_file", "unknown")
+    setting = match_persona_file(personas_file)
+    if setting is not None and setting not in runs_by_setting:
+        runs_by_setting[setting] = run
+
+# Filter to selected group, maintain settings_config order
+ordered_settings = [
+    s for s in settings_config
+    if s in runs_by_setting and settings_config[s]['group'] in ('both', NETWORK_GROUP)
+]
+n_cols = len(ordered_settings)
+
+fig, axes = plt.subplots(1, n_cols, figsize=(4 * n_cols, 4))
+if n_cols == 1:
+    axes = [axes]
+
+for idx, setting in enumerate(ordered_settings):
+    run = runs_by_setting[setting]
+
+    # Download the platform artifact (cached locally per run)
+    run_artifact_dir = Path("artifacts") / run.id
+    pkl_files = list(run_artifact_dir.glob("*.pkl"))
+    if not pkl_files:
+        artifacts = list(run.logged_artifacts())
+        platform_artifact = next(a for a in artifacts if a.type == "platform")
+        platform_artifact.download(root=str(run_artifact_dir))
+        pkl_files = list(run_artifact_dir.glob("*.pkl"))
+    with open(pkl_files[0], "rb") as f:
+        platform = pickle.load(f)
+
+    # Build network
+    G = nx.DiGraph()
+    G.add_nodes_from(user.identifier for user in platform.users)
+    G.add_edges_from(platform.user_links)
+
+    node_colors = [
+        PARTY_COLORS.get(user.persona.get('party', ''), '#999999')
+        for user in sorted(platform.users, key=lambda u: u.identifier)
+    ]
+
+    ax = axes[idx]
+    nx.draw_kamada_kawai(G, ax=ax, node_color=node_colors, edgecolors='black',
+                        node_size=100, width=1.0, linewidths=0.5)
+    panel_letter = chr(ord('A') + idx)
+    ax.set_title(f"({panel_letter}) {settings_config[setting]['label']}", fontweight='medium', pad=8, fontsize=22)
+
+# fig.suptitle(NETWORK_MODEL, fontsize=10, fontweight='medium')
+fig.tight_layout()
+safe_name = NETWORK_MODEL.replace("/", "_")
+fig.savefig(f'networks_{safe_name}.pdf', dpi=300, bbox_inches='tight', facecolor='white')
+fig.savefig(f'networks_{safe_name}.png', dpi=300, bbox_inches='tight', facecolor='white')
+plt.show()
+print(f"Saved networks_{safe_name}.pdf/png")
 # %%

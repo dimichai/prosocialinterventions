@@ -152,9 +152,9 @@ plt.show()
 
 COMPARISON_FILES = {
     "Full Persona":            os.path.join(os.path.dirname(__file__), "persona_interview_results_personas.csv"),
-    "No Love/Hate": os.path.join(os.path.dirname(__file__), "persona_interview_results_20260121_personas_with_bio_2000_noLoveHate_.csv"),
-    "No Love/Hate & PartyId": os.path.join(os.path.dirname(__file__), "persona_interview_results_20260123_personas_with_bio_2000_noLoveHate_noPartyId_.csv"),
-    "No Love/Hate, PartyId, & Vot. Beh.": os.path.join(os.path.dirname(__file__), "persona_interview_results_20260227_personas_with_bio_2000_noLoveHate_noPartyId_noVoted2020_.csv"),
+    "No AP": os.path.join(os.path.dirname(__file__), "persona_interview_results_20260121_personas_with_bio_2000_noLoveHate_.csv"),
+    "No AP & PID": os.path.join(os.path.dirname(__file__), "persona_interview_results_20260123_personas_with_bio_2000_noLoveHate_noPartyId_.csv"),
+    "No AP, PID, & VB": os.path.join(os.path.dirname(__file__), "persona_interview_results_20260227_personas_with_bio_2000_noLoveHate_noPartyId_noVoted2020_.csv"),
 }
 COMPARISON_OUTPUT_SLOPE = os.path.join(os.path.dirname(__file__), "interview_results.pdf")
 
@@ -202,7 +202,7 @@ x_ticks     = list(range(n_datasets))
 party_colors = {p: c for p, c in zip(all_parties, ["#03357D", "#888888", "#D50403", "#58508D", "#FFA600"])}
 
 # Per-panel nudges for rightmost label: {col: {party: y_offset}}
-right_nudge = {"q1_answer": {"Democrat": -0.04}}
+right_nudge = {"q1_answer": {"Non-partisan": -0.05}}
 
 # Right margin to accommodate party labels
 right_margin = 1.6
@@ -214,14 +214,21 @@ if n_questions == 1:
 for ax_idx, (ax, col) in enumerate(zip(axes, answer_cols)):
     r_nudges = right_nudge.get(col, {})
     for party in all_parties:
-        vals = [
-            dfs[label][dfs[label]["party"] == party][col].mean()
-            if party in dfs[label]["party"].values else float("nan")
-            for label in labels
-        ]
+        vals, errs = [], []
+        for label in labels:
+            subset = dfs[label][dfs[label]["party"] == party][col]
+            if party in dfs[label]["party"].values and len(subset) > 0:
+                p = subset.mean()
+                n = len(subset)
+                vals.append(p)
+                errs.append(1.96 * (p * (1 - p) / n) ** 0.5)
+            else:
+                vals.append(float("nan"))
+                errs.append(float("nan"))
         color = party_colors.get(party, "#888888")
-        ax.plot(x_ticks, vals, marker="o", color=color, linewidth=1.5,
-                markersize=4, solid_capstyle="round", clip_on=False)
+        ax.errorbar(x_ticks, vals, yerr=errs, marker="o", color=color,
+                    linewidth=1.5, markersize=4, solid_capstyle="round",
+                    clip_on=False, capsize=2, capthick=0.8, elinewidth=0.8)
         if not pd.isna(vals[-1]):
             ax.text(n_datasets - 1 + 0.12, vals[-1] + r_nudges.get(party, 0), party,
                     ha="left", va="center", fontsize=6.5, color=color)

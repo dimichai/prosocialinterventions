@@ -13,3 +13,4 @@ src/20260129_personas_with_bio_2000_noBioLoveHate_noBioVoted2020_.json
 src/20260227_personas_with_bio_2000_noLoveHate_noPartyId_noVoted2020_.json
 src/20260305_personas_with_bio_2000_noBioLoveHate_noBioPartyId_noBioVoted2020_.json
 src/News_Category_Dataset_v3.json
+analysis/artifacts/*

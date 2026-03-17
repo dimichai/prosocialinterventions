@@ -9,6 +9,7 @@ import numpy as np
 import wandb
 from collections import defaultdict
 from pathlib import Path
+from scipy.stats import mannwhitneyu
 
 # Keyed by persona file suffix. 'group' determines which plot row(s) the setting appears in.
 settings_config = {
@@ -87,19 +88,41 @@ plt.rcParams.update({
     'axes.spines.right': False,
 })
 
-def plot_metrics_comparison(axes, subset_keys, data):
+def plot_metrics_comparison(axes, subset_keys, data, raw_data=None, alpha=0.05):
+    """Plot bar charts with optional significance annotations vs the first (baseline) setting."""
     bar_colors = [settings_config[s]['color'] for s in subset_keys]
     bar_labels = [settings_config[s]['label'] for s in subset_keys]
     x = np.arange(len(subset_keys))
     width = 0.65
+    baseline = subset_keys[0]
+
+    # Mann-Whitney U tests: each ablation vs baseline, per metric
+    sig_map = {}  # (metric_idx, bar_idx) -> significant?
+    if raw_data and baseline in raw_data:
+        for metric_idx, metric in enumerate(METRICS):
+            baseline_vals = raw_data.get(baseline, {}).get(metric, [])
+            for bar_idx, setting in enumerate(subset_keys[1:], start=1):
+                ablation_vals = raw_data.get(setting, {}).get(metric, [])
+                if len(baseline_vals) >= 2 and len(ablation_vals) >= 2:
+                    _, p = mannwhitneyu(baseline_vals, ablation_vals, alternative='two-sided')
+                    sig_map[(metric_idx, bar_idx)] = p < alpha
 
     for idx, (metric, label) in enumerate(METRICS.items()):
         ax = axes[idx]
         values = [data[s][metric] for s in subset_keys]
         errors = [data[s][f'{metric}_se'] for s in subset_keys]
 
-        ax.bar(x, values, width, color=bar_colors, edgecolor='white', linewidth=0.5,
-               yerr=errors, capsize=3, error_kw={'elinewidth': 0.8, 'capthick': 0.8})
+        bars = ax.bar(x, values, width, color=bar_colors, edgecolor='white', linewidth=0.5,
+                      yerr=errors, capsize=3, error_kw={'elinewidth': 0.8, 'capthick': 0.8})
+
+        # Annotate significant differences with *
+        for bar_idx in range(1, len(subset_keys)):
+            if sig_map.get((idx, bar_idx), False):
+                bar_val = values[bar_idx]
+                bar_err = errors[bar_idx]
+                y_pos = bar_val + bar_err if bar_val >= 0 else bar_val - bar_err
+                ax.text(x[bar_idx], y_pos, '*', ha='center', va='bottom' if bar_val >= 0 else 'top',
+                        fontsize=12, fontweight='bold', color='#333333')
 
         ax.set_title(label, fontweight='medium', pad=8)
         ax.set_xticks(x)
@@ -167,10 +190,10 @@ for model_name in MODEL_NAMES:
 
     row = 0
     if bio_keys:
-        plot_metrics_comparison(axes[row], bio_keys, data=wandb_metrics)
+        plot_metrics_comparison(axes[row], bio_keys, data=wandb_metrics, raw_data=raw_per_setting)
         row += 1
     if list_keys:
-        plot_metrics_comparison(axes[row], list_keys, data=wandb_metrics)
+        plot_metrics_comparison(axes[row], list_keys, data=wandb_metrics, raw_data=raw_per_setting)
 
     safe_name = model_name.replace("/", "_")
     # fig.suptitle(model_name, fontsize=10, fontweight='medium')

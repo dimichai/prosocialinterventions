@@ -301,6 +301,7 @@ fig, axes = plt.subplots(1, n_cols, figsize=(4 * n_cols, 4))
 if n_cols == 1:
     axes = [axes]
 
+platforms_by_setting = {}
 for idx, setting in enumerate(ordered_settings):
     run = runs_by_setting[setting]
 
@@ -314,6 +315,7 @@ for idx, setting in enumerate(ordered_settings):
         pkl_files = list(run_artifact_dir.glob("*.pkl"))
     with open(pkl_files[0], "rb") as f:
         platform = pickle.load(f)
+    platforms_by_setting[setting] = platform
 
     # Build network
     G = nx.DiGraph()
@@ -331,13 +333,129 @@ for idx, setting in enumerate(ordered_settings):
     panel_letter = chr(ord('A') + idx)
     ax.set_title(f"({panel_letter}) {settings_config[setting]['label']}", pad=10)
 
-# fig.suptitle(NETWORK_MODEL, fontsize=10, fontweight='medium')
 fig.tight_layout()
 safe_name = NETWORK_MODEL.replace("/", "_")
 fig.savefig(f'networks_{safe_name}.pdf')
 fig.savefig(f'networks_{safe_name}.png')
 plt.show()
 print(f"Saved networks_{safe_name}.pdf/png")
+
+#%% Cross-party follow analysis
+# For each setting, compute per-party breakdown of who users follow (same vs opposing party)
+
+PARTIES = ['Democrat', 'Republican', 'Non-partisan']
+
+cross_party_rows = []
+for setting, platform in platforms_by_setting.items():
+    party_by_id = {user.identifier: user.persona.get('party', 'Unknown') for user in platform.users}
+
+    for from_id, to_id in platform.user_links:
+        from_party = party_by_id.get(from_id, 'Unknown')
+        to_party = party_by_id.get(to_id, 'Unknown')
+        cross_party_rows.append({
+            'setting': settings_config[setting]['label'],
+            'follower_party': from_party,
+            'followed_party': to_party,
+        })
+
+cross_party_df = pd.DataFrame(cross_party_rows)
+
+# Preserve setting order from PERSONAS_TO_PLOT
+setting_labels = [settings_config[s]['label'] for s in PERSONAS_TO_PLOT if s in platforms_by_setting]
+followed_colors = {'Democrat': '#03357D', 'Republican': '#D50403', 'Non-partisan': '#888888'}
+
+OPPOSING = {'Democrat': 'Republican', 'Republican': 'Democrat'}
+PANEL_PARTIES = ['Democrat', 'Republican']
+
+fig, axes = plt.subplots(1, 3, figsize=(10, 4), sharey=True)
+x_ticks = list(range(len(setting_labels)))
+
+def _slope_panel(ax, ax_idx, title, compute_fn):
+    """Draw slope lines for each party returned by compute_fn(setting_label, party) -> (p, n)."""
+    for party in PANEL_PARTIES:
+        vals, errs = [], []
+        for setting_label in setting_labels:
+            result = compute_fn(setting_label, party)
+            if result is None:
+                vals.append(float('nan'))
+                errs.append(float('nan'))
+                continue
+            p, n = result
+            vals.append(p)
+            errs.append(1.96 * (p * (1 - p) / n) ** 0.5)
+
+        color = followed_colors[party]
+        ax.errorbar(x_ticks, vals, yerr=errs, marker='o', color=color,
+                    linewidth=1.5, markersize=5, solid_capstyle='round',
+                    clip_on=False, capsize=3, capthick=1.0, elinewidth=1.0)
+        if not pd.isna(vals[-1]):
+            ax.text(len(x_ticks) - 1 + 0.12, vals[-1], party,
+                    va='center', color=color, clip_on=False)
+
+    ax.set_xticks(x_ticks)
+    ax.set_xticklabels(setting_labels, rotation=30, ha='right', rotation_mode='anchor')
+    ax.set_title(title, pad=8)
+    ax.set_ylabel('Fraction of follows' if ax_idx == 0 else '')
+    ax.set_ylim(-0.02, 1.02)
+    ax.yaxis.grid(True)
+    ax.set_xlim(-0.3, len(x_ticks) - 1 + 1.5)
+
+# Panel 1: Total cross-party follows (fraction of follows going to the opposing party)
+def cross_party_total(setting_label, party):
+    subset = cross_party_df[
+        (cross_party_df['setting'] == setting_label) &
+        (cross_party_df['follower_party'] == party)
+    ]
+    if subset.empty:
+        return None
+    opposite = OPPOSING[party]
+    p = (subset['followed_party'] == opposite).mean()
+    return p, len(subset)
+
+_slope_panel(axes[0], 0, 'Cross-party follows', cross_party_total)
+axes[0].axhline(y=0.215, color='#999999', linestyle='--', linewidth=1.0)
+# https://www.cambridge.org/core/journals/political-science-research-and-methods/article/national-network-of-us-state-legislators-on-twitter/FBC6D77F437C94213266AE24D75A9CC7#article
+axes[0].text(2.3, 0.13, '(Gopal et al., 2024)',
+             va='bottom', color='#999999', fontsize=9, fontstyle='italic', clip_on=False)
+
+# Panels 2–3: Democrat / Republican follows breakdown
+def party_follows_fn(setting_label, followed_party, follower_party):
+    subset = cross_party_df[
+        (cross_party_df['setting'] == setting_label) &
+        (cross_party_df['follower_party'] == follower_party)
+    ]
+    if subset.empty:
+        return None
+    p = (subset['followed_party'] == followed_party).mean()
+    return p, len(subset)
+
+for panel_idx, follower_party in enumerate(PANEL_PARTIES, start=1):
+    def _make_fn(fp=follower_party):
+        return lambda sl, fp2: party_follows_fn(sl, fp2, fp)
+    _slope_panel(axes[panel_idx], panel_idx, f'{follower_party} follows:', _make_fn())
+
+# https://economie.esg.uqam.ca/wp-content/uploads/sites/54/2017/09/Halberstam_Y_-_11-2015.pdf#page=34.82
+axes[1].axhline(y=0.6711, color=followed_colors['Democrat'], linestyle='--', linewidth=1.0, alpha=0.5)
+axes[1].axhline(y=0.3289, color=followed_colors['Republican'], linestyle='--', linewidth=1.0, alpha=0.5)
+axes[1].text(-0.2, 0.6711, '(Halberstam et al., 2016)',
+             va='bottom', color=followed_colors['Democrat'], fontsize=8, fontstyle='italic', clip_on=False)
+axes[1].text(2.3, 0.35, '(Halberstam et al., 2016)',
+             va='bottom', color=followed_colors['Republican'], fontsize=8, fontstyle='italic', clip_on=False)
+
+# Reference lines on Republican follows panel (Halberstam et al., 2016)
+axes[2].axhline(y=0.2025, color=followed_colors['Democrat'], linestyle='--', linewidth=1.0, alpha=0.5)
+axes[2].axhline(y=0.7975, color=followed_colors['Republican'], linestyle='--', linewidth=1.0, alpha=0.5)
+axes[2].text(2.0, 0.2025, '(Halberstam et al., 2016)',
+             va='bottom', color=followed_colors['Democrat'], fontsize=8, fontstyle='italic', clip_on=False)
+axes[2].text(2.0, 0.7975, '(Halberstam et al., 2016)',
+             va='bottom', color=followed_colors['Republican'], fontsize=8, fontstyle='italic', clip_on=False)
+
+safe_name = NETWORK_MODEL.replace("/", "_")
+fig.tight_layout()
+fig.savefig(f'cross_party_follows_{safe_name}.pdf')
+fig.savefig(f'cross_party_follows_{safe_name}.png')
+plt.show()
+print(f"Saved cross_party_follows_{safe_name}.pdf/png")
 #%% Ablation effect analysis: delta from baseline per removed feature
 ABLATION_FILES = {
     'personas.json': None,

@@ -270,7 +270,7 @@ if __name__ == "__main__":
     argparser = argparse.ArgumentParser()
     argparser.add_argument("--personas_file", type=str, default='personas.json', help="Path to the personas file")  
     argparser.add_argument("--user_link_strategy", type=str, default='on_repost_bio', help="User link strategy for the simulation")
-    argparser.add_argument("--timeline_select_strategy", type=str, default='other_partisan', help="Timeline selection strategy for the simulation") 
+    argparser.add_argument("--timeline_select_strategy", type=str, default='other_partisan', choices=['random', 'random_weighted', 'random_weighted_reversed', 'bridging_attributes', 'chronological', 'other_partisan'], help="Timeline selection strategy for the simulation")
     argparser.add_argument("--openrouter_api_key", type=int, default=None, help="If None, use OpenAI key, Which OpenRouter API key to use from env (1, 2, or 3)")
     argparser.add_argument("--llm_model", type=str, default="gpt-4o-mini", help="Which LLM model to use for the agents")
     argparser.add_argument("--news_feed", type=str, default='News_Category_Dataset_v3.json', help="Path to the news feed dataset")

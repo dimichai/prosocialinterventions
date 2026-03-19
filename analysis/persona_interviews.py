@@ -17,6 +17,52 @@ OUTPUT_FILE   = os.path.join(os.path.dirname(__file__), f"persona_interview_resu
 MODEL         = "gpt-4o-mini"
 
 
+plt.rcParams.update({
+    # Font
+    'font.family': 'sans-serif',
+    'font.sans-serif': ['Arial', 'Helvetica', 'DejaVu Sans'],
+    'font.size': 12,
+    'axes.titlesize': 14,
+    'axes.titleweight': 'medium',
+    'axes.labelsize': 12,
+    'xtick.labelsize': 11,
+    'ytick.labelsize': 11,
+    'legend.fontsize': 11,
+    'figure.titlesize': 16,
+    'figure.titleweight': 'medium',
+    # Axes
+    'axes.linewidth': 1.0,
+    'axes.spines.top': False,
+    'axes.spines.right': False,
+    'axes.grid': False,
+    'axes.axisbelow': True,
+    # Ticks
+    'xtick.major.width': 1.0,
+    'ytick.major.width': 1.0,
+    'xtick.major.size': 4,
+    'ytick.major.size': 4,
+    'xtick.direction': 'out',
+    'ytick.direction': 'out',
+    # Lines & patches
+    'lines.linewidth': 1.5,
+    'patch.edgecolor': 'white',
+    'patch.linewidth': 0.5,
+    # Grid (used selectively)
+    'grid.color': '#333333',
+    'grid.alpha': 0.15,
+    'grid.linestyle': '-',
+    # Figure
+    'figure.dpi': 150,
+    'savefig.dpi': 300,
+    'savefig.bbox': 'tight',
+    'savefig.facecolor': 'white',
+    'figure.facecolor': 'white',
+    # PDF/PS export with editable text
+    'pdf.fonttype': 42,
+    'ps.fonttype': 42,
+})
+
+
 QUESTIONS = [
     ("q1", "Would you follow someone who is a member of the opposing political party?"),   # ← fill in question 1
     ("q2", "Would you follow someone who loves Trump?"),
@@ -158,22 +204,22 @@ COMPARISON_FILES = {
 }
 COMPARISON_OUTPUT_SLOPE = os.path.join(os.path.dirname(__file__), "interview_results.pdf")
 
-plt.rcParams.update({
-    'font.family': 'sans-serif',
-    'font.sans-serif': ['Lato', 'Arial', 'DejaVu Sans'],
-    'font.size': 8,
-    'axes.titlesize': 9,
-    'axes.labelsize': 8,
-    'xtick.labelsize': 7,
-    'ytick.labelsize': 7,
-    'axes.linewidth': 0.8,
-    'xtick.major.width': 0.8,
-    'ytick.major.width': 0.8,
-    'xtick.major.size': 3,
-    'ytick.major.size': 3,
-    'axes.spines.top': False,
-    'axes.spines.right': False,
-})
+# plt.rcParams.update({
+#     'font.family': 'sans-serif',
+#     'font.sans-serif': ['Lato', 'Arial', 'DejaVu Sans'],
+#     'font.size': 8,
+#     'axes.titlesize': 9,
+#     'axes.labelsize': 8,
+#     'xtick.labelsize': 7,
+#     'ytick.labelsize': 7,
+#     'axes.linewidth': 0.8,
+#     'xtick.major.width': 0.8,
+#     'ytick.major.width': 0.8,
+#     'xtick.major.size': 3,
+#     'ytick.major.size': 3,
+#     'axes.spines.top': False,
+#     'axes.spines.right': False,
+# })
 
 def load_and_prepare(path: str) -> pd.DataFrame:
     df = pd.read_csv(path)
@@ -207,7 +253,7 @@ right_nudge = {"q1_answer": {"Non-partisan": -0.05}}
 # Right margin to accommodate party labels
 right_margin = 1.6
 
-fig, axes = plt.subplots(1, n_questions, figsize=(6.4, 3.2), sharey=True)
+fig, axes = plt.subplots(1, n_questions, figsize=(10, 4), sharey=True)
 if n_questions == 1:
     axes = [axes]
 
@@ -231,11 +277,11 @@ for ax_idx, (ax, col) in enumerate(zip(axes, answer_cols)):
                     clip_on=False, capsize=2, capthick=0.8, elinewidth=0.8)
         if not pd.isna(vals[-1]):
             ax.text(n_datasets - 1 + 0.12, vals[-1] + r_nudges.get(party, 0), party,
-                    ha="left", va="center", fontsize=6.5, color=color)
+                    ha="left", va="center", color=color)
 
     key = col.replace("_answer", "")
     ax.set_title(question_labels.get(key, question_texts.get(key, col)),
-                 fontweight='medium', pad=6)
+                 fontweight='medium', pad=8)
     ax.set_xticks(x_ticks)
     ax.set_xticklabels(labels, rotation=30, ha='right', rotation_mode='anchor')
     ax.set_xlim(-0.4, n_datasets - 1 + right_margin)

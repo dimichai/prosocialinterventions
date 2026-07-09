@@ -83,6 +83,44 @@ def match_persona_file(personas_file: str) -> str | None:
             return suffix
     return None
 
+def load_run(run, retries: int = 3, backoff: float = 5.0):
+    """Eagerly load a wandb run's full data with retries."""
+    import time
+    last_exc = None
+    for attempt in range(retries):
+        try:
+            run.load_full_data()
+            return run
+        except Exception as e:
+            last_exc = e
+            if attempt < retries - 1:
+                time.sleep(backoff * (2 ** attempt))
+    raise RuntimeError(f"Failed to load run '{run.id}' after {retries} attempts") from last_exc
+
+def fetch_runs(api, project: str, filters: dict) -> list:
+    """Fetch and fully load all runs matching filters, crashing on any failure."""
+    runs = list(api.runs(project, filters=filters))
+    return [load_run(r) for r in runs]
+
+def get_metric_from_run(run, metric: str, retries: int = 3, backoff: float = 5.0):
+    """Get the last logged value of a metric from a run's summary or history."""
+    import time
+    val = run.summary.get(f"final/{metric}")
+    if val is not None:
+        return val
+    # scan_history is more reliable than history(keys=...) which uses a flaky GraphQL endpoint
+    last_exc = None
+    for attempt in range(retries):
+        try:
+            rows = list(run.scan_history(keys=[metric]))
+            vals = [r[metric] for r in rows if metric in r and r[metric] is not None]
+            return vals[-1] if vals else None
+        except Exception as e:
+            last_exc = e
+            if attempt < retries - 1:
+                time.sleep(backoff * (2 ** attempt))
+    raise RuntimeError(f"Failed to fetch history for run '{run.name}', metric '{metric}' after {retries} attempts") from last_exc
+
 #%% Plot setup
 
 plt.rcParams.update({
@@ -158,13 +196,20 @@ def plot_metrics_comparison(axes, subset_keys, data, raw_data=None, alpha=0.05):
                       yerr=errors, capsize=4, error_kw={'elinewidth': 1.0, 'capthick': 1.0})
 
         # Annotate significant differences with *
+        y_range = max((abs(v) + e for v, e in zip(values, errors) if not np.isnan(v)), default=1.0)
+        y_pad = y_range * 0.05
         for bar_idx in range(1, len(subset_keys)):
             if sig_map.get((idx, bar_idx), False):
                 bar_val = values[bar_idx]
                 bar_err = errors[bar_idx]
-                y_pos = bar_val + bar_err if bar_val >= 0 else bar_val - bar_err
-                ax.text(x[bar_idx], y_pos, '*', ha='center', va='bottom' if bar_val >= 0 else 'top',
-                        fontweight='bold', color='#333333')
+                if bar_val >= 0:
+                    y_pos = bar_val + bar_err + y_pad
+                    va = 'bottom'
+                else:
+                    y_pos = bar_val - bar_err - y_pad
+                    va = 'top'
+                ax.text(x[bar_idx], y_pos, '*', ha='center', va=va,
+                        fontsize=13, fontweight='bold', color='#333333')
 
         ax.set_title(label, pad=8)
         ax.set_xticks(x)
@@ -187,13 +232,9 @@ PERSONAS = [
     'noLoveHate_noPartyId_noVoted2020_.json',
 ]
 
-api = wandb.Api()
+api = wandb.Api(timeout=120)
 for model_name in MODEL_NAMES:
-    runs = api.runs(
-        "prosocial-interventions",
-        filters={"config.llm_model": model_name},
-    )
-    runs = list(runs)
+    runs = fetch_runs(api, "prosocial-interventions", filters={"config.llm_model": model_name})
     print(f"\nFound {len(runs)} runs with llm_model='{model_name}'")
 
     # Group runs by timeline_select_strategy
@@ -216,11 +257,7 @@ for model_name in MODEL_NAMES:
                 continue
 
             for metric in METRICS:
-                val = run.summary.get(f"final/{metric}")
-                if val is None:
-                    hist = run.history(keys=[metric], pandas=True)
-                    if len(hist) > 0 and metric in hist.columns:
-                        val = hist[metric].dropna().iloc[-1] if not hist[metric].dropna().empty else None
+                val = get_metric_from_run(run, metric)
                 if val is not None:
                     raw_per_setting[setting][metric].append(val)
 
@@ -268,10 +305,10 @@ for model_name in MODEL_NAMES:
         safe_name = model_name.replace("/", "_")
         safe_strategy = strategy.replace("/", "_")
         fig.tight_layout(pad=1.5, h_pad=4.0)
-        fig.savefig(FIGS_DIR / f'metrics_comparison_{safe_name}_{safe_strategy}.pdf')
-        fig.savefig(FIGS_DIR / f'metrics_comparison_{safe_name}_{safe_strategy}.png')
+        fig.savefig(FIGS_DIR / f'{safe_name}_{safe_strategy}_metrics_comparison.pdf')
+        fig.savefig(FIGS_DIR / f'{safe_name}_{safe_strategy}_metrics_comparison.png')
         plt.show()
-        print(f"    Saved metrics_comparison_{safe_name}_{safe_strategy}.pdf/png")
+        print(f"    Saved {safe_name}_{safe_strategy}_metrics_comparison.pdf/png")
 
 #%% Plot networks
 
@@ -290,11 +327,8 @@ PARTY_COLORS = {
 NETWORK_MODEL = "gpt-4o-mini"
 NETWORK_GROUP = "persona"
 
-api = wandb.Api()
-network_runs = list(api.runs(
-    "prosocial-interventions",
-    filters={"config.llm_model": NETWORK_MODEL},
-))
+api = wandb.Api(timeout=120)
+network_runs = fetch_runs(api, "prosocial-interventions", filters={"config.llm_model": NETWORK_MODEL})
 
 # Group by timeline_select_strategy
 network_strategies = sorted(set(r.config.get("timeline_select_strategy", "unknown") for r in network_runs))
@@ -362,10 +396,10 @@ for strategy in network_strategies:
     fig.tight_layout()
     safe_name = NETWORK_MODEL.replace("/", "_")
     safe_strategy = strategy.replace("/", "_")
-    fig.savefig(FIGS_DIR / f'networks_{safe_name}_{safe_strategy}.pdf')
-    fig.savefig(FIGS_DIR / f'networks_{safe_name}_{safe_strategy}.png')
+    fig.savefig(FIGS_DIR / f'{safe_name}_{safe_strategy}_networks.pdf')
+    fig.savefig(FIGS_DIR / f'{safe_name}_{safe_strategy}_networks.png')
     plt.show()
-    print(f"  Saved networks_{safe_name}_{safe_strategy}.pdf/png")
+    print(f"  Saved {safe_name}_{safe_strategy}_networks.pdf/png")
 
     all_platforms_by_strategy[strategy] = platforms_by_setting
 
@@ -486,10 +520,10 @@ for strategy in network_strategies:
     safe_name = NETWORK_MODEL.replace("/", "_")
     safe_strategy = strategy.replace("/", "_")
     fig.tight_layout()
-    fig.savefig(FIGS_DIR / f'cross_party_follows_{safe_name}_{safe_strategy}.pdf')
-    fig.savefig(FIGS_DIR / f'cross_party_follows_{safe_name}_{safe_strategy}.png')
+    fig.savefig(FIGS_DIR / f'{safe_name}_{safe_strategy}_cross_party_follows.pdf')
+    fig.savefig(FIGS_DIR / f'{safe_name}_{safe_strategy}_cross_party_follows.png')
     plt.show()
-    print(f"  Saved cross_party_follows_{safe_name}_{safe_strategy}.pdf/png")
+    print(f"  Saved {safe_name}_{safe_strategy}_cross_party_follows.pdf/png")
 #%% Ablation effect analysis: delta from baseline per removed feature
 ABLATION_FILES = {
     'personas.json': None,
@@ -511,11 +545,7 @@ def plot_ablation_effects(model_name: str):
     per removed feature per metric, and plot horizontal bar charts — one figure per strategy.
     """
     api = wandb.Api()
-
-    runs = list(api.runs(
-        "prosocial-interventions",
-        filters={"config.llm_model": model_name},
-    ))
+    runs = fetch_runs(api, "prosocial-interventions", filters={"config.llm_model": model_name})
 
     strategies = sorted(set(r.config.get("timeline_select_strategy", "unknown") for r in runs))
     all_dfs = []
@@ -533,11 +563,7 @@ def plot_ablation_effects(model_name: str):
                 continue
             ablated_feature = ABLATION_FILES[matched]  # None for baseline
             for metric in METRICS:
-                val = run.summary.get(f"final/{metric}")
-                if val is None:
-                    hist = run.history(keys=[metric], pandas=True)
-                    if len(hist) > 0 and metric in hist.columns:
-                        val = hist[metric].dropna().iloc[-1] if not hist[metric].dropna().empty else None
+                val = get_metric_from_run(run, metric)
                 if val is not None:
                     raw[ablated_feature][metric].append(val)
 
@@ -582,11 +608,18 @@ def plot_ablation_effects(model_name: str):
                     color=bar_colors,
                     capsize=4, error_kw={'elinewidth': 1.0, 'capthick': 1.0})
 
+            x_range = max((abs(r['delta']) + r['se'] for _, r in metric_df.iterrows() if not np.isnan(r['delta'])), default=1.0)
+            x_pad = x_range * 0.04
             for i, (_, r) in enumerate(metric_df.iterrows()):
                 if r['p'] < 0.05:
-                    x_pos = r['delta'] + r['se'] if r['delta'] >= 0 else r['delta'] - r['se']
-                    ax.text(x_pos, y_pos[i], ' *', ha='left' if r['delta'] >= 0 else 'right',
-                            va='center', fontweight='bold', color='#333333')
+                    if r['delta'] >= 0:
+                        x_pos = r['delta'] + r['se'] + x_pad
+                        ha = 'left'
+                    else:
+                        x_pos = r['delta'] - r['se'] - x_pad
+                        ha = 'right'
+                    ax.text(x_pos, y_pos[i], '*', ha=ha,
+                            va='center', fontsize=13, fontweight='bold', color='#333333')
 
             ax.set_yticks(y_pos)
             ax.set_yticklabels(metric_df['removed_feature'])
@@ -598,13 +631,15 @@ def plot_ablation_effects(model_name: str):
         safe_strategy = strategy.replace("/", "_")
         fig.suptitle(r"Ablation Effect ($\Delta$ from Full Persona Baseline)")
         fig.tight_layout()
-        fig.savefig(FIGS_DIR / f'ablation_effects_{safe_name}_{safe_strategy}.pdf')
-        fig.savefig(FIGS_DIR / f'ablation_effects_{safe_name}_{safe_strategy}.png')
+        fig.savefig(FIGS_DIR / f'{safe_name}_{safe_strategy}_ablation_effects.pdf')
+        fig.savefig(FIGS_DIR / f'{safe_name}_{safe_strategy}_ablation_effects.png')
         plt.show()
-        print(f"  Saved ablation_effects_{safe_name}_{safe_strategy}.pdf/png")
+        print(f"  Saved {safe_name}_{safe_strategy}_ablation_effects.pdf/png")
 
     return pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
 
-ablation_df = plot_ablation_effects("gpt-4o-mini")
+# ablation_df = plot_ablation_effects("gpt-4o-mini")
+ablation_df = plot_ablation_effects("google/gemini-2.5-flash-lite")
+ablation_df = plot_ablation_effects("mistralai/mistral-small-3.2-24b-instruct")
 
 # %%

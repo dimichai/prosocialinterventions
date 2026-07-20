@@ -191,7 +191,9 @@ handles = [plt.Rectangle((0, 0), 1, 1, color=c) for c in ["#4878A8", "#D45500"]]
 fig.legend(handles, ["Yes", "No"], loc="upper right", frameon=False)
 fig.suptitle("Yes/No answers by party", fontsize=11)
 plt.tight_layout()
-plt.savefig(OUTPUT_FILE.replace(".csv", "_by_party.png"), bbox_inches="tight", dpi=150)
+FIGS_DIR = os.path.join(os.path.dirname(__file__), "figs")
+os.makedirs(FIGS_DIR, exist_ok=True)
+plt.savefig(os.path.join(FIGS_DIR, f"persona_interview_results_{personas_setting}_by_party.png"), bbox_inches="tight", dpi=150)
 plt.show()
 
 #%%
@@ -202,7 +204,7 @@ COMPARISON_FILES = {
     "No AP & PID": os.path.join(os.path.dirname(__file__), "persona_interview_results_20260123_personas_with_bio_2000_noLoveHate_noPartyId_.csv"),
     "No AP, PID, & VB": os.path.join(os.path.dirname(__file__), "persona_interview_results_20260227_personas_with_bio_2000_noLoveHate_noPartyId_noVoted2020_.csv"),
 }
-COMPARISON_OUTPUT_SLOPE = os.path.join(os.path.dirname(__file__), "interview_results.pdf")
+COMPARISON_OUTPUT_SLOPE = os.path.join(os.path.dirname(__file__), "figs", "interview_results.pdf")
 
 # plt.rcParams.update({
 #     'font.family': 'sans-serif',

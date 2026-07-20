@@ -22,9 +22,43 @@ def format_list(words):
     else:
         formatted_words = ", ".join(words[:-1])
         return f"{formatted_words}, and {words[-1]}"
-    
+
+OBFUSCATION_COLUMNS = {
+    'neutral': 'Obfuscation A -- Neutral',
+    'nonce': 'Obfuscation B -- Nonce',
+}
+
+# Builds a term -> obfuscated term lookup from persona_obfuscations.csv for the given mode.
+def load_obfuscation_map(mode):
+    if mode == 'none':
+        return {}
+
+    df = pd.read_csv('persona_obfuscations.csv')
+    col = OBFUSCATION_COLUMNS[mode]
+
+    mapping = {}
+    for term, obfuscated_term in zip(df['Term'], df[col]):
+        if pd.isna(term) or pd.isna(obfuscated_term):
+            continue
+        mapping[term] = obfuscated_term
+        # Guard against straight vs curly apostrophe mismatches (e.g. "Bachelor's degree")
+        if "'" in term:
+            mapping[term.replace("'", "’")] = obfuscated_term
+        elif "’" in term:
+            mapping[term.replace("’", "'")] = obfuscated_term
+
+    return mapping
+
+# Looks up the obfuscated form of a single value or fixed sentence. Passes it through
+# unchanged if obfuscation is off (mapping is empty) or the value has no mapping entry.
+def obf(value, mapping):
+    return mapping.get(value, value)
+
+
 # This code fetches lines from the ANES, and returns as readable dict
-def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=False, ignore_voted2020=False):
+def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=False, ignore_voted2020=False, obfuscation='none'):
+
+    obfuscation_map = load_obfuscation_map(obfuscation)
 
     df = pd.read_csv('anes_timeseries_2020_csv_20220210.csv', low_memory=False)
 
@@ -553,11 +587,11 @@ def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=Fal
         l['age'] = d['V201507x']
 
         if d['gender'] is not None:
-            l['persona'] += f"You are {d['gender']}.\n"
+            l['persona'] += f"You are {obf(d['gender'], obfuscation_map)}.\n"
 
         if d['martialStatus'] is not None:
-            l['persona'] += f"You are {d['martialStatus']}.\n"
-            
+            l['persona'] += f"You are {obf(d['martialStatus'], obfuscation_map)}.\n"
+
         if d['income'] is not None and d['income']>0:
             if d['income'] >= 1 and d['income'] <= 10:
                 incomeclass = 'low income'
@@ -565,7 +599,7 @@ def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=Fal
                 incomeclass = 'middle income'
             else:
                 incomeclass = 'high income'
-            l['persona'] += f"You are {incomeclass}.\n"
+            l['persona'] += f"You are {obf(incomeclass, obfuscation_map)}.\n"
 
         if d['V201507x'] is not None:
             l['persona'] += f"Age: {d['V201507x']}.\n" 
@@ -573,7 +607,7 @@ def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=Fal
         religions = {1: 'Protestant', 2: 'Evangelical Protestant', 3: 'Black Protestant', 4: 'Protestant',  5: 'Catholic', 6: 'Christian', 7: 'Jewish', 9: 'not religious'}
         l['religion'] = d['V201458x']
         if d['V201458x'] in list(religions.keys()):
-            l['persona'] += f"You are {religions[d['V201458x']]}.\n"
+            l['persona'] += f"You are {obf(religions[d['V201458x']], obfuscation_map)}.\n"
 
         l['state'] = d['state']
         l['education'] = d['education']
@@ -581,32 +615,32 @@ def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=Fal
         l['sexOrientation'] = d['sexOrientation']
 
         if d['state'] is not None:
-            l['persona'] += f"You are from {d['state']}.\n"
-        if d['education'] is not None: 
-            l['persona'] += f"Education: {d['education']}.\n"
-        if d['race'] is not None: 
-            l['persona'] += f"You are {d['race']}.\n"
-        if d['sexOrientation'] is not None: 
-            l['persona'] += f"You are {d['sexOrientation']}.\n"
+            l['persona'] += f"You are from {obf(d['state'], obfuscation_map)}.\n"
+        if d['education'] is not None:
+            l['persona'] += f"Education: {obf(d['education'], obfuscation_map)}.\n"
+        if d['race'] is not None:
+            l['persona'] += f"You are {obf(d['race'], obfuscation_map)}.\n"
+        if d['sexOrientation'] is not None:
+            l['persona'] += f"You are {obf(d['sexOrientation'], obfuscation_map)}.\n"
         
         l['party'] = 'Democrat' if l['partisan'] < 0 else 'Republican' if l['partisan'] > 0 else 'Non-partisan'        
         
         #People who never talk about politics: we add other preferences
         if d['V202545'] == 5: # V202023
-            l['persona'] += "You never talk about politics.\n" #
+            l['persona'] += obf("You never talk about politics.", obfuscation_map) + "\n"
             l['never_talk_politics'] = True
         else:
             l['never_talk_politics'] = False
-        
+
         #Fishing
         if d['V202567'] == 1:
-            l['persona'] += "You like to go fishing or hunting.\n" #
+            l['persona'] += obf("You like to go fishing or hunting.", obfuscation_map) + "\n"
 
         l['fishing'] = d['V202567']
 
         if not ignore_voted2020:
             if d['vote2020'] in ['Donald Trump','Joe Biden']:
-                l['persona'] += f"You voted for {d['vote2020']} in 2020.\n"
+                l['persona'] += f"You voted for {obf(d['vote2020'], obfuscation_map)} in 2020.\n"
                 l['voted2020'] = True
                 l['voted2020_for'] = d['vote2020']
             else:
@@ -615,61 +649,61 @@ def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=Fal
         if not ignore_party_identity:
             #Generate party affiliation
             if l['partisan'] == 0:
-                l['persona'] += 'You prefer neither political party.\n'
+                l['persona'] += obf('You prefer neither political party.', obfuscation_map) + '\n'
             if l['partisan'] < 0 and l['partisan'] > -0.2:
-                l['persona'] += 'You prefer the Democrats.\n'
+                l['persona'] += obf('You prefer the Democrats.', obfuscation_map) + '\n'
             if l['partisan'] > 0 and l['partisan'] < 0.2:
-                l['persona'] += 'You prefer the Republicans.\n'
+                l['persona'] += obf('You prefer the Republicans.', obfuscation_map) + '\n'
             if l['partisan'] <= -0.2 and l['partisan'] > -0.5:
-                l['persona'] += 'You are a Democrat.\n'
+                l['persona'] += obf('You are a Democrat.', obfuscation_map) + '\n'
             if l['partisan'] >= 0.2 and l['partisan'] < 0.5:
-                l['persona'] += 'You are a Republican.\n'
+                l['persona'] += obf('You are a Republican.', obfuscation_map) + '\n'
             if l['partisan'] <= -0.5:
-                l['persona'] += 'You are a strong Democrat.\n'
+                l['persona'] += obf('You are a strong Democrat.', obfuscation_map) + '\n'
             if l['partisan'] >= 0.5:
-                l['persona'] += 'You are a strong Republican.\n'
+                l['persona'] += obf('You are a strong Republican.', obfuscation_map) + '\n'
 
         l['justifiedViolence'] = d['justifiedViolence']
-        
+
         if d['justifiedViolence'] in [3,4,5]:
-            l['persona'] += "You think political violence is justified.\n"
+            l['persona'] += obf("You think political violence is justified.", obfuscation_map) + "\n"
 
         if not ignore_love_hate:
             if len(lovelist)>0:
-                l['persona'] += f'You love {format_list(lovelist)}.\n'
+                l['persona'] += f'You love {format_list([obf(v, obfuscation_map) for v in lovelist])}.\n'
 
             if len(hatelist)>0:
-                l['persona'] += f'You hate {format_list(hatelist)}.\n'            
+                l['persona'] += f'You hate {format_list([obf(v, obfuscation_map) for v in hatelist])}.\n'
 
 
         l['arguePolitics'] =d['V202545']== 1 or d['V202545']== 2
         #You post online a lot or always about politics, or you get into political argument in the last 12 months
-        if d['V202545']== 1 or d['V202545']== 2: #d['V202024']== 1 or 
-            l['persona'] += "You like to argue about politics.\n"
+        if d['V202545']== 1 or d['V202545']== 2: #d['V202024']== 1 or
+            l['persona'] += obf("You like to argue about politics.", obfuscation_map) + "\n"
 
-            
+
         if d['liberalConservative'] is not None:
-                l['persona'] += f'You consider yourself {d["liberalConservative"]}.\n' 
+                l['persona'] += f'You consider yourself {obf(d["liberalConservative"], obfuscation_map)}.\n'
 
         problems = [d['problem1'],d['problem2'],d['problem3']]
         problems = [p for p in problems if p is not None and type(p) == str]
 
         if len(problems)==1:
-            l['persona'] += f'You think the most important problem facing the country is {format_list(problems)}.\n'
+            l['persona'] += f'You think the most important problem facing the country is {format_list([obf(p, obfuscation_map) for p in problems])}.\n'
         elif len(problems)>1:
-            l['persona'] += f'You think the most important problems facing the country are {format_list(problems)}.\n'
+            l['persona'] += f'You think the most important problems facing the country are {format_list([obf(p, obfuscation_map) for p in problems])}.\n'
 
         l['importantProblems'] = problems
 
         l['gunsOwned'] = d['gunsOwned']
 
         if d['gunsOwned'] > 0:
-            l['persona'] += "You own guns.\n"
+            l['persona'] += obf("You own guns.", obfuscation_map) + "\n"
 
 
         if len(hobbies_liked)>0:
-            l['persona'] += f'You like to watch {format_list(hobbies_liked)} on TV.\n'
-        
+            l['persona'] += f'You like to watch {format_list([obf(h, obfuscation_map) for h in hobbies_liked])} on TV.\n'
+
         res.append(l)
 
 
@@ -746,28 +780,33 @@ if __name__ == "__main__":
     argparser.add_argument("--ignore_love_hate", action='store_true', default=False, help="Whether to ignore love/hate lists")
     argparser.add_argument("--ignore_party_identity", action='store_true', default=False, help="Whether to ignore party identity info")
     argparser.add_argument("--ignore_voted2020", action='store_true', default=False, help="Whether to ignore voted2020 info")
+    argparser.add_argument("--ignore_extend_with_ai", action='store_true', default=False, help="Whether to skip extending personas with AI-generated occupation/hobbies")
     # Here, the parameters control what is added to the public bio of the agent. The persona generation always uses all info.
     argparser.add_argument("--ignore_bio_love_hate", action='store_true', default=False, help="Whether to ignore love/hate lists in bio")
     argparser.add_argument("--ignore_bio_party_identity", action='store_true', default=False, help="Whether to ignore party identity info in bio")
     argparser.add_argument("--ignore_bio_voted2020", action='store_true', default=False, help="Whether to ignore voted2020 info in bio")
+    argparser.add_argument("--obfuscation", choices=['none', 'neutral', 'nonce'], default='none', help="Obfuscate identifying terms in the persona text: none (as-is), neutral (generic labels), nonce (meaningless tokens)")
     args = argparser.parse_args()
-    
+
     #Example usage
     # print(return_persona_string())
 
-    personas = get_anes_rows(args.num_personas, 
-                            ignore_love_hate=args.ignore_love_hate, 
-                            ignore_party_identity=args.ignore_party_identity, 
-                            ignore_voted2020=args.ignore_voted2020)
-    
+    personas = get_anes_rows(args.num_personas,
+                            ignore_love_hate=args.ignore_love_hate,
+                            ignore_party_identity=args.ignore_party_identity,
+                            ignore_voted2020=args.ignore_voted2020,
+                            obfuscation=args.obfuscation)
+
     personas_file_name = (
         f"{datetime.now().strftime('%Y%m%d')}_personas_{args.num_personas}_"
         f"{'noLoveHate_' if args.ignore_love_hate else ''}"
         f"{'noPartyId_' if args.ignore_party_identity else ''}"
         f"{'noVoted2020_' if args.ignore_voted2020 else ''}"
+        f"{'noExtendWithAi_' if args.ignore_extend_with_ai else ''}"
         f"{'noBioLoveHate_' if args.ignore_bio_love_hate else ''}"
         f"{'noBioPartyId_' if args.ignore_bio_party_identity else ''}"
         f"{'noBioVoted2020_' if args.ignore_bio_voted2020 else ''}"
+        f"{'obf' + args.obfuscation.capitalize() + '_' if args.obfuscation != 'none' else ''}"
         ".json"
     )
     json.dump(personas, open(personas_file_name,"w"))
@@ -781,9 +820,10 @@ if __name__ == "__main__":
     for persona in personas:
         print(i)
         i+=1
-        extend_with_ai(persona, client)
+        if not args.ignore_extend_with_ai:
+            extend_with_ai(persona, client)
         add_biography(persona, client)
-        print(persona['biography'])
+        print(persona['persona'], persona['biography'])
         print()
 
     filename = (
@@ -791,9 +831,11 @@ if __name__ == "__main__":
         f"{'noLoveHate_' if args.ignore_love_hate else ''}"
         f"{'noPartyId_' if args.ignore_party_identity else ''}"
         f"{'noVoted2020_' if args.ignore_voted2020 else ''}"
+        f"{'noExtendWithAi_' if args.ignore_extend_with_ai else ''}"
         f"{'noBioLoveHate_' if args.ignore_bio_love_hate else ''}"
         f"{'noBioPartyId_' if args.ignore_bio_party_identity else ''}"
         f"{'noBioVoted2020_' if args.ignore_bio_voted2020 else ''}"
+        f"{'obf' + args.obfuscation.capitalize() + '_' if args.obfuscation != 'none' else ''}"
         ".json"
     )
     with open(filename, "w") as f:

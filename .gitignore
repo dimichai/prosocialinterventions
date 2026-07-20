@@ -18,3 +18,4 @@ analysis/artifacts/*
 analysis/persona_interview_results*
 .gitignore
 analysis/figs/*
+PersonaGeneration/anes_timeseries_2020_csv_20220210.csv

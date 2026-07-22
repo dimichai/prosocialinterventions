@@ -10,12 +10,13 @@ from openai import OpenAI
 
 
 class Post():
-    def __init__(self, post_id: int, author: Agent, timestamp: datetime, content: str, show_info: bool = True, calculate_bridging: bool = False):
+    def __init__(self, post_id: int, author: Agent, timestamp: datetime, content: str, show_info: bool = True, calculate_bridging: bool = False, news_category: str = None):
         self.post_id = post_id
         self.author = author
         self.timestamp = timestamp
         self.content = content
-        
+        self.news_category = news_category
+
         self.reposts = 0
         self.reposters = []
 
@@ -87,6 +88,7 @@ Content: {self.content}"""
             "author": self.author.identifier,
             "timestamp": self.timestamp,
             "content": self.content,
+            "news_category": self.news_category,
             "reposts": self.reposts,
             "reposters": self.reposters
         }
@@ -491,13 +493,13 @@ class Platform():
 
         return timeline
     
-    def post(self, user: Agent, content: str):
+    def post(self, user: Agent, content: str, news_category: str = None):
         """
         User posts a message.
         """
 
         timestamp = datetime.now()
-        post = Post(len(self.posts)+1, user, timestamp, content, show_info=self.show_info, calculate_bridging=self.timeline_select_strategy=='bridging_attributes')
+        post = Post(len(self.posts)+1, user, timestamp, content, show_info=self.show_info, calculate_bridging=self.timeline_select_strategy=='bridging_attributes', news_category=news_category)
 
         self.raw_posts.append(post)
 
@@ -570,7 +572,7 @@ class Platform():
             "prompt": prompt
         })
 
-    def parse_and_do_action(self, user_id: int, action: Action, prompt: str) -> None:
+    def parse_and_do_action(self, user_id: int, action: Action, prompt: str, news_data: list = None) -> None:
         """
         Based on the action chosen by the user, perform the action.
         """
@@ -581,9 +583,12 @@ class Platform():
             print("User not found")
             self.add_action(user_id, action, False, prompt)
             return
-        
+
         if action.option == 2:
-            self.post(agent, action.content)
+            news_category = None
+            if news_data and 1 <= action.news_id <= len(news_data):
+                news_category = news_data[action.news_id - 1]['category']
+            self.post(agent, action.content, news_category=news_category)
         elif action.option == 1:
 
             try:

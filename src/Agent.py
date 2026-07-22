@@ -1,7 +1,7 @@
 import json
 import random
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from openai import OpenAI
 from openai.types.chat import ParsedChoice
@@ -12,6 +12,7 @@ class Action(BaseModel):
     option: int
     content: str
     explanation: str
+    news_id: int = Field(default=0, description="If option is 2, the ID of the news headline (from the list under 'Here are the news headlines for option 2') that was chosen to share. Otherwise 0.")
 
 class BooleanAction(BaseModel):
     choice: str

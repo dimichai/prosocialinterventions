@@ -83,8 +83,24 @@ def compute_metrics(platform, step, cost_input, cost_output, cost_cached, comput
     for action_type, count in action_counts.items():
         metrics[f"action_{action_type}"] = count
 
+    # Total reposts per news category
+    for category, total_reposts in category_repost_totals(platform).items():
+        metrics[f"category_reposts_{category}"] = total_reposts
+
     metrics["seconds_to_log"] = time.time() - log_start_time
     return metrics
+
+def category_repost_totals(platform):
+    """
+    Total number of reposts received by posts sharing a news headline, grouped by news category.
+    Posts not tied to a news headline (option 1 reposts of a plain post, or posts with no
+    resolvable category) are excluded.
+    """
+    totals = Counter()
+    for post in platform.raw_posts:
+        if post.news_category:
+            totals[post.news_category] += post.reposts
+    return dict(totals)
 
 def log_action(user, action):
     """
@@ -209,8 +225,9 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
         user = platform.sample_user()
 
         # Perform an action
-        action, prompt = user.perform_action(news_feed.get_random_news(10), platform.get_timeline(user.identifier, 10))
-        platform.parse_and_do_action(user.identifier, action, prompt)
+        news_data = news_feed.get_random_news(10)
+        action, prompt = user.perform_action(news_data, platform.get_timeline(user.identifier, 10))
+        platform.parse_and_do_action(user.identifier, action, prompt, news_data)
 
         print(log_action(user, action))
 

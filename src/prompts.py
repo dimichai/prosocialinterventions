@@ -1,9 +1,7 @@
 AGENT_SYSTEM_MESSAGE = """You are a user of the X social media platform.
 This is a platform where users share opinions and thoughts on topics of interest in the form of posts.
 Your main goal is to repost others' posts and you are also able to share your own posts.
-
-Here is a description of your persona:
-{persona}"""
+{persona_section}"""
 
 AGENT_BIOGRAPHY_PROMPT = """Write a very short (max. 140 characters), very informal social media biography for the following persona:
 

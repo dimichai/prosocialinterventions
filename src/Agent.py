@@ -20,9 +20,11 @@ class BooleanAction(BaseModel):
 
 class Agent():
 
-    def __init__(self, model: str, persona: dict = None):
+    def __init__(self, model: str, persona: dict = None, no_personas: bool = False, no_bio: bool = False):
 
         self.persona = persona
+        self.no_personas = no_personas
+        self.no_bio = no_bio
 
         self.llm = None
         self.model = model
@@ -54,7 +56,8 @@ class Agent():
         Generate a system message to introduce the agent to the system and its persona.
         """
 
-        return P.AGENT_SYSTEM_MESSAGE.format(persona=self.persona["persona"])
+        persona_section = "" if self.no_personas else f"\nHere is a description of your persona:\n{self.persona['persona']}"
+        return P.AGENT_SYSTEM_MESSAGE.format(persona_section=persona_section)
     
     def _add_bio(self):
 
@@ -144,7 +147,7 @@ class Agent():
             post_content=post_content,
             user_id=other_agent.identifier,
             follower_count_line=f"Followers: {other_agent.followers}\n" if use_follower_count else "",
-            bio_line=f"Bio: {other_agent.persona['biography']}\n" if use_bio else "",
+            bio_line=f"Bio: {other_agent.persona['biography']}\n" if use_bio and not self.no_bio else "",
             recent_posts=recent_posts,
         )
 

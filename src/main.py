@@ -145,21 +145,39 @@ def select_users(persona_path, n):
 
     return democrat_sample + republican_sample + non_partisan_sample
 
-def run_simulation(simulation_size = 500, simulation_steps = 10000, 
-                user_link_strategy = "on_repost_bio", 
+def get_persona_label(personas_file, no_personas, no_bio):
+    """
+    Label used for the wandb run name/config and the results directory.
+    When --no_personas/--no_bio are set, the persona file's identity no longer
+    describes the run, so the label reflects the ablation instead of the filename.
+    """
+    if no_personas and no_bio:
+        return "no_personas_no_bio"
+    elif no_personas:
+        return "no_personas"
+    elif no_bio:
+        return "no_bio"
+    return personas_file.split('.')[0]
+
+def run_simulation(simulation_size = 500, simulation_steps = 10000,
+                user_link_strategy = "on_repost_bio",
                 timeline_select_strategy = "random_weighted",
                 llm_model = "gpt-4o-mini",
                 news_feed = 'News_Category_Dataset_v3.json',
-                show_info = True, 
-                sim_path="", 
+                show_info = True,
+                sim_path="",
                 personas_file = 'personas.json',
-                openrouter_api_key = None, 
+                openrouter_api_key = None,
                 log = True,
-                save_full_log = False):
-    
+                save_full_log = False,
+                no_personas = False,
+                no_bio = False):
+
+    persona_label = get_persona_label(personas_file, no_personas, no_bio)
+
     if log:
-        wandb.init(project="prosocial-interventions", 
-            name=f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{personas_file.split('.')[0]}", 
+        wandb.init(project="prosocial-interventions",
+            name=f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{persona_label}",
             config={
                 "simulation_size": simulation_size,
                 "simulation_steps": simulation_steps,
@@ -167,7 +185,8 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
                 "timeline_select_strategy": timeline_select_strategy,
                 "llm_model": llm_model,
                 "news_feed": news_feed,
-                "personas_file": personas_file,
+                "personas_file": persona_label,
+                "personas_file_original": personas_file,
                 "persona_love_hate_lists": 'noLoveHate' not in personas_file,
                 "persona_party_id": 'noPartyId' not in personas_file,
                 "persona_voted2020": 'noVoted2020' not in personas_file,
@@ -214,7 +233,7 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
         )
 
     # Register users
-    [platform.register_user(Agent(model, user)) for user in selected_users]
+    [platform.register_user(Agent(model, user, no_personas=no_personas, no_bio=no_bio)) for user in selected_users]
     platform.set_client(client)
     
     for i in range(simulation_steps):
@@ -295,10 +314,13 @@ if __name__ == "__main__":
     argparser.add_argument("--simulation_steps", type=int, default=5000, help="Number of steps to run the simulation for")
     argparser.add_argument('--no_log', action='store_true', default=False)
     argparser.add_argument('--save_full_log', action='store_true', default=False, help="Whether to save the full log of the simulation in a json (can be large)")
-    
+    argparser.add_argument('--no_personas', action='store_true', default=False, help="Omit the persona description from the agent's system prompt (neutral-agent baseline)")
+    argparser.add_argument('--no_bio', action='store_true', default=False, help="Omit the target user's bio when an agent decides whether to follow them")
+
     args = argparser.parse_args()
-    
-    sim_dir = f"../results/{args.personas_file.split('.')[0]}_{args.user_link_strategy}_{args.timeline_select_strategy}"
+
+    persona_label = get_persona_label(args.personas_file, args.no_personas, args.no_bio)
+    sim_dir = f"../results/{persona_label}_{args.user_link_strategy}_{args.timeline_select_strategy}"
     sim_run = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     sim_path = Path(sim_dir, sim_run)
     os.makedirs(sim_dir, exist_ok=True)
@@ -315,5 +337,7 @@ if __name__ == "__main__":
         personas_file=args.personas_file,
         openrouter_api_key=args.openrouter_api_key,
         log = not args.no_log,
-        save_full_log=args.save_full_log
+        save_full_log=args.save_full_log,
+        no_personas=args.no_personas,
+        no_bio=args.no_bio
     )

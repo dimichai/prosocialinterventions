@@ -39,6 +39,16 @@ def compute_metrics(platform, step, cost_input, cost_output, cost_cached, comput
         EL = len(platform.user_links) - IL
         metrics["EI_index"] = (EL - IL) / (EL + IL)
 
+    # EI index restricted to Democrat/Republican nodes only
+    dem_rep_links = [(u1, u2) for u1, u2 in platform.user_links
+                      if platform.get_user(u1).persona['party'] in ('Democrat', 'Republican')
+                      and platform.get_user(u2).persona['party'] in ('Democrat', 'Republican')]
+    if len(dem_rep_links) > 0:
+        IL_dem_rep = sum(1 for u1, u2 in dem_rep_links
+                if platform.get_user(u1).persona['party'] == platform.get_user(u2).persona['party'])
+        EL_dem_rep = len(dem_rep_links) - IL_dem_rep
+        metrics["EI_index_dem_rep"] = (EL_dem_rep - IL_dem_rep) / (EL_dem_rep + IL_dem_rep)
+
     # Gini coefficients
     if sum(follower_distribution) > 0:
         metrics["gini_followers"] = gini_coefficient(follower_distribution)

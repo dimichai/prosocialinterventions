@@ -167,7 +167,7 @@ def get_persona_label(personas_file, no_personas, no_bio):
         return "no_personas"
     elif no_bio:
         return "no_bio"
-    return personas_file.split('.')[0]
+    return personas_file
 
 def run_simulation(simulation_size = 500, simulation_steps = 10000,
                 user_link_strategy = "on_repost_bio",

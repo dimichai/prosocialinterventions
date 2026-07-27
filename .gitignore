@@ -4,6 +4,7 @@ results/*
 src/__pycache__/*
 analysis/__pycache__/*
 src/wandb/*
+wandb/*
 src/20260121_personas_with_bio_2000_noLoveHate_.json
 src/20260123_personas_with_bio_2000_noLoveHate_noPartyId_.json
 src/20260124_personas_with_bio_2000_noLoveHate_noVoted2020_.json

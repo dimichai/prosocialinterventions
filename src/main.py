@@ -205,6 +205,9 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
                 "bio_love_hate_lists": 'noLoveHate' not in personas_file and 'noBioLoveHate' not in personas_file,
                 "bio_party_id": 'noPartyId' not in personas_file and 'noBioPartyId' not in personas_file,
                 "bio_voted2020": 'noVoted2020' not in personas_file and 'noBioVoted2020' not in personas_file,
+                "no_personas": no_personas,
+                "no_bio": no_bio,
+                "no_news_category": no_news_category,
             }
         )
 

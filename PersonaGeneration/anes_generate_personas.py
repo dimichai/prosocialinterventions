@@ -24,8 +24,18 @@ def format_list(words):
         return f"{formatted_words}, and {words[-1]}"
 
 OBFUSCATION_COLUMNS = {
-    'neutral': 'Obfuscation A -- Neutral',
-    'nonce': 'Obfuscation B -- Nonce',
+    'neutral': 'A_Neutral',
+    'nonce': 'B_Nonce',
+    'randomreal': 'C_RandomReal',
+    'randomnonce': 'D_RandomNonce',
+}
+
+# Display label for each obfuscation mode, used when building output file names.
+OBFUSCATION_LABELS = {
+    'neutral': 'Neutral',
+    'nonce': 'Nonce',
+    'randomreal': 'RandomReal',
+    'randomnonce': 'RandomNonce',
 }
 
 # Builds a term -> obfuscated term lookup from persona_obfuscations.csv for the given mode.
@@ -785,7 +795,7 @@ if __name__ == "__main__":
     argparser.add_argument("--ignore_bio_love_hate", action='store_true', default=False, help="Whether to ignore love/hate lists in bio")
     argparser.add_argument("--ignore_bio_party_identity", action='store_true', default=False, help="Whether to ignore party identity info in bio")
     argparser.add_argument("--ignore_bio_voted2020", action='store_true', default=False, help="Whether to ignore voted2020 info in bio")
-    argparser.add_argument("--obfuscation", choices=['none', 'neutral', 'nonce'], default='none', help="Obfuscate identifying terms in the persona text: none (as-is), neutral (generic labels), nonce (meaningless tokens)")
+    argparser.add_argument("--obfuscation", choices=['none', 'neutral', 'nonce', 'randomreal', 'randomnonce'], default='none', help="Obfuscate identifying terms in the persona text: none (as-is), neutral (generic labels), nonce (meaningless tokens), randomreal (random real terms), randomnonce (random meaningless tokens)")
     args = argparser.parse_args()
 
     #Example usage
@@ -806,7 +816,7 @@ if __name__ == "__main__":
         f"{'noBioLoveHate_' if args.ignore_bio_love_hate else ''}"
         f"{'noBioPartyId_' if args.ignore_bio_party_identity else ''}"
         f"{'noBioVoted2020_' if args.ignore_bio_voted2020 else ''}"
-        f"{'obf' + args.obfuscation.capitalize() + '_' if args.obfuscation != 'none' else ''}"
+        f"{'obf' + OBFUSCATION_LABELS[args.obfuscation] + '_' if args.obfuscation != 'none' else ''}"
         ".json"
     )
     json.dump(personas, open(personas_file_name,"w"))
@@ -835,7 +845,7 @@ if __name__ == "__main__":
         f"{'noBioLoveHate_' if args.ignore_bio_love_hate else ''}"
         f"{'noBioPartyId_' if args.ignore_bio_party_identity else ''}"
         f"{'noBioVoted2020_' if args.ignore_bio_voted2020 else ''}"
-        f"{'obf' + args.obfuscation.capitalize() + '_' if args.obfuscation != 'none' else ''}"
+        f"{'obf' + OBFUSCATION_LABELS[args.obfuscation] + '_' if args.obfuscation != 'none' else ''}"
         ".json"
     )
     with open(filename, "w") as f:

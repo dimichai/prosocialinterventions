@@ -1,0 +1,229 @@
+Term,A_Neutral,B_Nonce,C_RandomReal,D_RandomNonce
+PARTY / IDEOLOGY LABELS,POLITICAL AFFILIATION / IDEOLOGY LABELS,POLITICAL AFFILIATION / IDEOLOGY LABELS,POLITICAL AFFILIATION / IDEOLOGY LABELS,POLITICAL AFFILIATION / IDEOLOGY LABELS
+Democrat,Political Group POL01 affiliate,miveilum affiliate,Yarn,yazgabiy affiliate
+Republican,Political Group POL02 affiliate,tirapik affiliate,Railing,paoxlav affiliate
+Democrats,Political Group POL01 affiliates,miveilum affiliates,Yarns,yazgabiy affiliates
+Republicans,Political Group POL02 affiliates,tirapik affiliates,Railings,paoxlav affiliates
+liberal,Political Orientation IDEO01-aligned,skelaerov,Sampler,evgbxgoqz
+conservative,Political Orientation IDEO02-aligned,mivaevra,Galley,yazxgzox
+liberals,Political Orientation IDEO01-aligned people,skelaerov people,Samplers,evgbxgoqz people
+conservatives,Political Orientation IDEO02-aligned people,mivaevra people,Galleys,yazxgzox people
+extremely liberal,extremely Political Orientation IDEO01-aligned,extremely skelaerov,extremely Sampler,extremely evgbxgoqz
+slightly liberal,slightly Political Orientation IDEO01-aligned,slightly skelaerov,slightly Sampler,slightly evgbxgoqz
+slightly conservative,slightly Political Orientation IDEO02-aligned,slightly mivaevra,slightly Galley,slightly yazxgzox
+extremely conservative,extremely Political Orientation IDEO02-aligned,extremely mivaevra,extremely Galley,extremely yazxgzox
+strong Democrat,strong Political Group POL01 affiliate,strong miveilum affiliate,strong Yarn,strong yazgabiy affiliate
+strong Republican,strong Political Group POL02 affiliate,strong tirapik affiliate,strong Railing,strong paoxlav affiliate
+You prefer neither political party.,You prefer neither Political Group POL01 nor Political Group POL02.,You prefer neither miveilum nor tirapik.,You prefer neither Yarn nor Railing.,You prefer neither yazgabiy nor paoxlav.
+You prefer the Democrats.,You prefer Political Group POL01.,You prefer miveilum.,You prefer Yarn.,You prefer yazgabiy.
+You prefer the Republicans.,You prefer Political Group POL02.,You prefer tirapik.,You prefer Railing.,You prefer paoxlav.
+You are a Democrat.,You are affiliated with Political Group POL01.,You are affiliated with miveilum.,You are affiliated with Yarn.,You are affiliated with yazgabiy.
+You are a Republican.,You are affiliated with Political Group POL02.,You are affiliated with tirapik.,You are affiliated with Railing.,You are affiliated with paoxlav.
+You are a strong Democrat.,You are strongly affiliated with Political Group POL01.,You are strongly affiliated with miveilum.,You are strongly affiliated with Yarn.,You are strongly affiliated with yazgabiy.
+You are a strong Republican.,You are strongly affiliated with Political Group POL02.,You are strongly affiliated with tirapik.,You are strongly affiliated with Railing.,You are strongly affiliated with paoxlav.
+POLITICIANS / VOTE HISTORY,PUBLIC FIGURES / VOTE HISTORY,PUBLIC FIGURES / VOTE HISTORY,PUBLIC FIGURES / VOTE HISTORY,PUBLIC FIGURES / VOTE HISTORY
+Joe Biden,Political Figure FIG01,muriorov,Trunk,yioaqoqz
+Donald Trump,Political Figure FIG02,mivovek,Oar,yazqzgv
+Hillary Clinton,Political Figure FIG03,wexioxoq,Beacon,kgtaqtqn
+Barack Obama,Political Figure FIG04,pelaemor,Plank,lgbxgyqo
+Mitt Romney,Political Figure FIG05,skelelek,Mullion,evgbgbgv
+Didn't vote,Didn't vote for any Political Figures,Didn't vote for any Political Figures,Orange Lantern,Didn't vote
+LOVE/HATE NAMED ENTITIES,LOVE/HATE NAMED ENTITIES,LOVE/HATE NAMED ENTITIES,LOVE/HATE NAMED ENTITIES,LOVE/HATE NAMED ENTITIES
+Muslims,members of Belief Group BEL05,members of suluzan,members of Column,members of eibicxh
+Christians,members of Belief Group BEL03,members of thuupik,members of Ladder,members of pjiilav
+Jews,members of Belief Group BEL04,members of joraelek,members of Stool,members of mqoxgbgv
+Police,Public Institution INST01,kiviolek,Mandolin,vazaqbgv
+transgender people,people in Identity Group IDEN01,people in zemionix,people in Ledger,people in cgyaqhat
+scientists,members of Profession Group PROF01 of Field FIELD01,members of tiraexoq,members of Hearth of Caliper,members of paoxgtqn
+Black Lives Matter,Social Movement MOVE01 concerning Population Group POP02,vexupel,Tile concerning Bucket,zgtilgb
+journalists,members of Profession Group PROF02,members of zanilek,members of Doormat,members of cxhabgv
+NRA,Advocacy Organization ORG01 concerning Policy Topic TOP35,lokeinal,Corner concerning Carton,bqvgahxb
+rural Americans,members of Regional Community COMM01,members of fenozor,members of Straw,members of wghqcqo
+Anthony Fauci,Public Figure FIG06,fruobem,Coaster,woiqrgy
+Christian Fundamentalists,members of Belief Subgroup BEL03S01,members of peleruk,members of Umbrella,members of lgbgoiv
+feminists,supporters of Social Movement MOVE02,supporters of zavisel,supporters of Pencil,supporters of cxzaegb
+homosexuals,people with Orientation ORIENT02,people with zanemir,people with Lamp,people with cxhgyao
+NATO,International Organization INTORG01,thuapel,Sleeve,pjixlgb
+socialists,members of Economic-System Group ECON01,members of zemeidun,members of Bedside,members of cgygasih
+capitalists,members of Economic-System Group ECON02,members of riveipik,members of Cupboard,members of oazgalav
+#MeToo,Social Movement MOVE03,veleirin,Linen,zgbgaoah
+GENDER,GENDER,GENDER,GENDER,GENDER
+male,Gender GEND01,vexunix,Ginger,zgtihat
+female,Gender GEND02,qaseitum,Ambergris,nxegapiy
+MARITAL STATUS,RELATIONSHIP-STATUS,RELATIONSHIP-STATUS,RELATIONSHIP-STATUS,RELATIONSHIP-STATUS
+married,Relationship Status REL01,vexiobem,Paddle,zgtaqrgy
+widowed,Relationship Status REL02,rivizor,Nest,oazacqo
+divorced,Relationship Status REL03,thuaerov,Daisy,pjixgoqz
+separated,Relationship Status REL04,cyriotis,Key,dfoaqpae
+never married,Relationship Status REL05,mivaqir,Hoop,yazxnao
+INCOME CLASS,RESOURCE-LEVEL,RESOURCE-LEVEL,RESOURCE-LEVEL,RESOURCE-LEVEL
+low income,Resource Level RES01,thuesel,Dune,pjigegb
+middle income,Resource Level RES02,lokosel,Jar,bqvqegb
+high income,Resource Level RES03,tavional,Spring,pxzaqhxb
+RELIGION,BELIEF-AFFILIATION,BELIEF-AFFILIATION,BELIEF-AFFILIATION,BELIEF-AFFILIATION
+Protestant,Belief Group BEL01,lunobem,Bonnet,bihqrgy
+Evangelical Protestant,Belief Subgroup BEL01S01,bralionix,Countertop,roxbaqhat
+Black Protestant,Belief Subgroup BEL01S02,nuvizor,Balcony,hizacqo
+Catholic,Belief Group BEL02,thuadan,Diary,pjixsxh
+Christian,Belief Group BEL03,thuupik,Ladder,pjiilav
+Jewish,Belief Group BEL04,joraelek,Stool,mqoxgbgv
+not religious,No Belief Group affiliation,taveikesh,Shoebox,pxzgavgej
+RACE,POPULATION-GROUP,POPULATION-GROUP,POPULATION-GROUP,POPULATION-GROUP
+White,Population Group POP01,nyxizan,Binder,hftacxh
+Black,Population Group POP02,kivuvar,Bucket,vazizxo
+Hispanic,Population Group POP03,qelupel,Mosaic,ngbilgb
+Asian,Population Group POP04,hynidan,Lattice,jfhasxh
+Native American,Population Group POP05,hyneqen,Granite,jfhgngh
+Multiple races,Multiple Population Groups,zaneirin,Maple,cxhgaoah
+SEXUAL ORIENTATION,ORIENTATION,ORIENTATION,ORIENTATION,ORIENTATION
+heterosexual,Orientation ORIENT01,zavuqen,Fountain,cxzingh
+homosexual,Orientation ORIENT02,zanemir,Lamp,cxhgyao
+bisexual,Orientation ORIENT03,zanevos,Kiosk,cxhgzqe
+EDUCATION,CREDENTIALS,CREDENTIALS,CREDENTIALS,CREDENTIALS
+Less than high school,Credential Category CRE01,quviomir,Bench,nizaqyao
+High school,Credential Category CRE02,cyrepik,Chisel,dfoglav
+Bachelor's degree,Credential Category CRE03,mivutis,Bobbin,yazipae
+Graduate degree,Credential Category CRE04,skelutis,Fence,evgbipae
+STATE,REGION ATTRIBUTE,REGION ATTRIBUTE,REGION ATTRIBUTE,REGION ATTRIBUTE
+Alabama,Region REG01,zavriko,Anvil,cxzoavq
+Alaska,Region REG02,qelvuna,Sundial,ngbzihx
+Arizona,Region REG03,murekto,Terrarium,yiogvpq
+Arkansas,Region REG04,tivrane,Sideboard,pazoxhg
+California,Region REG05,pexalor,Spindle,lgtxbqo
+Colorado,Region REG06,nuzerim,Toolbox,hicgoay
+Connecticut,Region REG07,varkelo,Cornice,zxovgbq
+Delaware,Region REG08,jomirax,Pocket,mqyaoxt
+Florida,Region REG09,sulveno,Loaf,eibzghq
+Georgia,Region REG10,drexali,Wicker,sogtxba
+Hawaii,Region REG11,kovirun,Pantry,vqzaoih
+Idaho,Region REG12,fenzaro,Arbor,wghcxoq
+Illinois,Region REG13,luprevi,Braid,bilogza
+Indiana,Region REG14,baxorin,Portico,rxtqoah
+Iowa,Region REG15,qavemir,Blossom,nxzgyao
+Kansas,Region REG16,toralux,Satchel,pqoxbit
+Kentucky,Region REG17,zelvori,Willow,cgbzqoa
+Louisiana,Region REG18,merqano,Mitten,ygonxhq
+Maine,Region REG19,vuxeril,Carob,zitgoab
+Maryland,Region REG20,sorvaki,Jacket,eqozxva
+Massachusetts,Region REG21,pelnuro,Bakery,lgbhioq
+Michigan,Region REG22,raxevon,Pillow,oxtgzqh
+Minnesota,Region REG23,kilzari,Clock,vabcxoa
+Mississippi,Region REG24,dovemul,Buckle,sqzgyib
+Missouri,Region REG25,nexarip,Sandstone,hgtxoal
+Montana,Region REG26,wexulor,Ridge,kgtibqo
+Nebraska,Region REG27,givarun,Parcel,uazxoih
+Nevada,Region REG28,valqeri,Wagon,zxbngoa
+New Hampshire,Region REG29,zorevik,Curtain,cqogzav
+New Jersey,Region REG30,qinorax,Rope,nahqoxt
+New Mexico,Region REG31,beluvin,Basin,rgbizah
+New York,Region REG32,tavriso,Arrowroot,pxzoaeq
+North Carolina,Region REG33,mexavor,Earthenware,ygtxzqo
+North Dakota,Region REG34,lunqeri,Hourglass,bihngoa
+Ohio,Region REG35,pavrixo,Tunnel,lxzoatq
+Oklahoma,Region REG36,zerunel,Casket,cgoihgb
+Oregon,Region REG37,kivarum,Abacus,vazxoiy
+Pennsylvania,Region REG38,folqeni,Freestone,wqbngha
+Rhode Island,Region REG39,jaxuvor,Walnut,mxtizqo
+South Carolina,Region REG40,mirezak,Skylight,yaogcxv
+South Dakota,Region REG41,nurvexo,Dulcimer,hiozgtq
+Tennessee,Region REG42,qorasim,Scroll,nqoxeay
+Texas,Region REG43,velqano,Handrail,zgbnxhq
+Utah,Region REG44,cyravon,Rug,dfoxzqh
+Vermont,Region REG45,dexulir,Pinwheel,sgtibao
+Virginia,Region REG46,palavex,Buttercup,lxbxzgt
+Washington,Region REG47,nureqis,Cedar,hiognae
+Washington DC,Region REG48,sovarik,Lagoon,eqzxoav
+West Virginia,Region REG49,kelmuro,Circle,vgbyioq
+Wisconsin,Region REG50,zinvarel,Leaf,cahzxogb
+Wyoming,Region REG51,bruqeno,Cabin,roinghq
+IMPORTANT PROBLEMS,POLICY-TOPICS,POLICY-TOPICS,POLICY-TOPICS,POLICY-TOPICS
+Defense spending,Policy Topic TOP01 concerning Policy Topic TOP07 and Policy Topic TOP38,lokiokesh,Hammock concerning Knapsack and Sailcloth,bqvaqvgej
+Middle East,Policy Topic TOP02,hynalek,Blanket,jfhxbgv
+Iraq,Policy Topic TOP03 concerning Policy Topic TOP02 and Policy Topic TOP04,nuvafex,Canopy concerning Blanket and Deck,hizxwgt
+War,Policy Topic TOP04 concerning Policy Topic TOP13,gloeruk,Deck concerning Timber,ubqgoiv
+Terrorism,Policy Topic TOP05,fenilum,Teapot,wghabiy
+Veterans,Policy Topic TOP06 concerning Policy Topic TOP04 and Policy Topic TOP77,tirorov,Window concerning Deck and Pitcher,paoqoqz
+National defense,Policy Topic TOP07,voquvar,Knapsack,zqnizxo
+Foreign aid,Policy Topic TOP08 concerning Policy Topic TOP13,xaleilum,Saddle concerning Timber,txbgabiy
+Foreign Trade,"Policy Topic TOP09 concerning Policy Topic TOP13, Policy Topic TOP50, and Policy Topic TOP58",xalugai,"Terrace concerning Timber, Bellflower, and Lanyard",txbiuxa
+Protection of US jobs,Policy Topic TOP10 concerning Policy Topic TOP50 and Policy Topic TOP27,xalonix,Island concerning Bellflower and Cobble,txbqhat
+Serbia /Balkans,Policy Topic TOP11 concerning Policy Topic TOP13,xaleilek,Rake concerning Timber,txbgabgv
+China,Policy Topic TOP12 concerning Policy Topic TOP13 and Policy Topic TOP09,fruavar,Harbor concerning Timber and Terrace,woixzxo
+International affairs,Policy Topic TOP13,nuvirov,Timber,hizaoqz
+Energy crisis,Policy Topic TOP14 is-subtopic-of Policy Topic TOP16,xaliosel,Lilac is-subtopic-of Funnel,txbaqegb
+Energy prices,Policy Topic TOP15 is-subtopic-of Policy Topic TOP16,suluvra,Cactus is-subtopic-of Funnel,eibizox
+Energy,Policy Topic TOP16 concerning Policy Topic TOP18,zemunix,Funnel concerning Bookcase,cgyihat
+Environment,Policy Topic TOP17,voqubem,Driftwood,zqnirgy
+Natural Resources,Policy Topic TOP18 concerning Policy Topic TOP17,mivogai,Bookcase concerning Driftwood,yazquxa
+Education and training,Policy Topic TOP19 concerning Policy Topic TOP21 and Credential Categories,xalivra,Kiln concerning Barrel and Veranda,txbazox
+School funding,Policy Topic TOP20 concerning Policy Topic TOP21,bexobem,Goblet concerning Barrel,rgtqrgy
+Education,Policy Topic TOP21 concerning Credential Categories,nuvelum,Barrel concerning Veranda,hizgbiy
+AIDS,Policy Topic TOP22 concerning Policy Topic TOP24,muriolum,Petal concerning Zipper,yioaqbiy
+Medicare,Policy Topic TOP23 concerning Policy Topic TOP24,lokavra,Rattan concerning Zipper,bqvxzox
+Health,Policy Topic TOP24,riviotum,Zipper,oazaqpiy
+Welfare,Policy Topic TOP25 concerning Policy Topic TOP50,lunipel,Rowboat concerning Bellflower,bihalgb
+Poverty,Policy Topic TOP26 concerning Policy Topic TOP50,fruesiv,Gear concerning Bellflower,woigeaz
+Employment,Policy Topic TOP27 concerning Policy Topic TOP50,bexuvra,Cobble concerning Bellflower,rgtizox
+Housing,Policy Topic TOP28 concerning Policy Topic TOP50,raxaelum,Flute concerning Bellflower,oxtxgbiy
+Social security,Policy Topic TOP29 concerning Policy Topic TOP24 and Policy Topic TOP38,mivodan,Bracelet concerning Zipper and Sailcloth,yazqsxh
+Income,Policy Topic TOP30 concerning Resource Levels and Policy Topic TOP50,zemivar,Workshop concerning Drawer and Bellflower,cgyazxo
+Crime,Policy Topic TOP31 concerning Policy Topic TOP37,zanaevra,Gate concerning Muslin,cxhxgzox
+Race relations,Policy Topic TOP32 concerning Population Groups,raxaeqir,Stoneware concerning Maple,oxtxgnao
+Illegal drugs,Policy Topic TOP33 concerning Policy Topic TOP24 and Policy Topic TOP31,cyrezan,Marble concerning Zipper and Gate,dfogcxh
+Police problems,"Policy Topic TOP34 concerning Policy Topic TOP31, Policy Topic TOP37, and Public Institution INST01",bexurin concerning kiviolek,Stepladder concerning Gate and Muslin,rgtioah concerning vazaqbgv
+Guns,Policy Topic TOP35 concerning Policy Topic TOP31 and Object Category OBJ01,krouxoq concerning gloiokesh,Carton concerning Gate and Bowl,voqitqn concerning ubqaqvgej
+Corporate Corruption,Policy Topic TOP36 concerning Policy Topic TOP44 and Policy Topic TOP58,pruumir,Ottoman concerning Valance and Lanyard,loiiyao
+Justice,Policy Topic TOP37 concerning Policy Topic TOP31 and Policy Topic TOP49,nuvioxoq,Muslin concerning Gate and Kettle,hizaqtqn
+Budget,Policy Topic TOP38 concerning Policy Topic TOP49 and Policy Topic TOP50,dreexoq,Sailcloth concerning Kettle and Bellflower,soggtqn
+Size of government,Policy Topic TOP39 concerning Policy Topic TOP49,zaveipik,Greenhouse concerning Kettle,cxzgalav
+Taxes,Policy Topic TOP40 concerning Policy Topic TOP38 and Policy Topic TOP49,feyetum,Spool concerning Sailcloth and Kettle,wgfgpiy
+Immigration,Policy Topic TOP41 concerning Population Groups,lunaelek,Rack concerning Maple,bihxgbgv
+Campaign finance,Policy Topic TOP42 is-subtopic-of Policy Topic TOP73,pelioqen,Loom is-subtopic-of Batten,lgbaqngh
+Political corruption,"Policy Topic TOP43 concerning Policy Topic TOP44, Policy Topic TOP49, and Policy Topic TOP73",dreamir,"Badge concerning Valance, Kettle, and Batten",sogxyao
+Ethics,Policy Topic TOP44,raxioqen,Valance,oxtaqngh
+Government power,Policy Topic TOP45 concerning Policy Topic TOP49,tavoxoq,Handle concerning Kettle,pxzqtqn
+Budget priorities,Policy Topic TOP46 concerning Policy Topic TOP49 and policy Topic TOP50,sulanal,Cushion concerning Kettle and Bellflower,eibxhxb
+Partisan politics,Policy Topic TOP47 concerning Policy Topic TOP73 and Public-Affairs Domain PUBDOM01,xalovra concerning dreeivek,Basinette concerning Batten and Bottle,txbqzox concerning soggazgv
+Politicians,"Policy Topic TOP48 concerning Policy Topic TOP49, Policy Topic TOP73, and Political Figures",krooqen,"Juniper concerning Kettle, Batten, and Mantel",voqqngh
+Government,Policy Topic TOP49,skelezor,Kettle,evgbgcqo
+The economy,Policy Topic TOP50,nyxusiv,Bellflower,hftieaz
+Stock market,Policy Topic TOP51 concerning Policy Topic TOP50,fruefex,Carafe concerning Bellflower,woigwgt
+Economic inequality,Policy Topic TOP52 concerning Policy Topic TOP50 and Resource Levels,skelaeruk,Scarf concerning Bellflower and Drawer,evgbxgoiv
+Recession,Policy Topic TOP53 concerning Policy Topic TOP50 and Resource Levels,jorolum,Balloon concerning Bellflower and Drawer,mqoqbiy
+Inflation,Policy Topic TOP54 concerning Policy Topic TOP50 and Resource Levels,rivofex,Bracket concerning Bellflower and Drawer,oazqwgt
+Economics,Policy Topic TOP55 concerning Policy Topic TOP50,mivivek,Orchard concerning Bellflower,yazazgv
+Agriculture,"Policy Topic TOP56 concerning Policy Topic TOP18, Policy Topic TOP50, and Policy Topic TOP58",voqepel,"Globe concerning Bookcase, Bellflower, and Lanyard",zqnglgb
+Science,Policy Topic TOP57 concerning Field FIELD01,zavonal concerning feyikesh,Faucet,cxzqhxb concerning wgfavgej
+Commerce,Policy Topic TOP58 concerning Policy Topic TOP50,lokudun,Lanyard concerning Bellflower,bqvisih
+Transportation,Policy Topic TOP59 concerning Policy Topic TOP58 and Policy Topic TOP60,joridan,Mirror concerning Lanyard and Garment,mqoasxh
+Community development,Policy Topic TOP60 concerning Policy Topic TOP52,feniovra,Garment concerning Scarf,wghaqzox
+Abortion,Policy Topic TOP61 concerning Policy Topic TOP77,murevos,Burlap concerning Pitcher,yiogzqe
+Child care,Policy Topic TOP62 concerning Policy Topic TOP66,zemeivek,Woodpile concerning Corbel,cgygazgv
+Overpopulation,Policy Topic TOP63 concerning Policy Topic TOP17 and Policy Topic TOP18,lunulek,Reed concerning Driftwood and Bookcase,bihibgv
+Public morality,Policy Topic TOP64 concerning Policy Topic TOP44 and Policy Topic TOP74,jorilek,Wheelbarrow concerning Valance and Platter,mqoabgv
+Domestic violence,"Policy Topic TOP65 concerning Policy Topic TOP31, Policy Topic TOP37, and Policy Topic TOP66",jorubem,"Cistern concerning Gate, Muslin, and Corbel",mqoirgy
+Family,Policy Topic TOP66,quvoruk,Corbel,nizqoiv
+Young people,Policy Topic TOP67 concerning Policy Topic TOP66,kroulum,Sketch concerning Corbel,voqibiy
+Sexual identity /LGBT+ issues,Policy Topic TOP68 concerning Orientations,fruotum concerning thuovar,Chamber concerning Thermos,woiqpiy concerning pjiqzxo
+The media,"Policy Topic TOP69 concerning Policy Topic TOP73, Public-Affairs Domain PUBDOM01, and Media Programs",fenomor,"Notebook concerning Batten, Bottle, and Carpet",wghqyqo
+Sexism /Gender issues,Policy Topic TOP70 concerning Policy Topic TOP68 and Orientations,rivapel concerning feniokesh,Chestnut concerning Chamber and Thermos,oazxlgb concerning wghaqvgej
+Afghanistan,Policy Topic TOP71 concerning Policy Topic TOP04 and Policy Topic TOP13,velilek,Pulley concerning Deck and Timber,zgbabgv
+Syria,Policy Topic TOP72 concerning Policy Topic TOP04 and Policy Topic TOP13,vexarov,Shade concerning Deck and Timber,zgtxoqz
+Elections,"Policy Topic TOP73 concerning Policy Topic TOP49, Political Groups, and Political Figures",quvetis,"Batten concerning Kettle, Dowel, and Mantel",nizgpae
+Religion,Policy Topic TOP74 concerning Belief Groups and Policy Topic TOP64,veleiqir concerning luneinal,Platter concerning Compass and Wheelbarrow,zgbganao concerning bihgahxb
+Civility,Policy Topic TOP75 concerning Policy Topic TOP76,feniotum,Weathercock concerning Accordion,wghaqpiy
+Unity /division,Policy Topic TOP76 concerning Policy Topic TOP75,zanavos,Accordion concerning Weathercock,cxhxzqe
+Health care,Policy Topic TOP77 concerning Policy Topic TOP24,zavaedun,Pitcher concerning Zipper,cxzxgsih
+OTHER ATTITUDE / BEHAVIOR PHRASES,OTHER ATTITUDE / BEHAVIOR ATTRIBUTES,OTHER ATTITUDE / BEHAVIOR ATTRIBUTES,OTHER ATTITUDE / BEHAVIOR ATTRIBUTES,OTHER ATTITUDE / BEHAVIOR ATTRIBUTES
+You think political violence is justified.,"You think Action ACT01 is justified related to Policy Topic TOP31, Policy Topic TOP47, Policy Topic TOP48, Policy Topic TOP73",You think kivinix is justified.,"You think Amphora is justified related to Gate, Basinette, Juniper, Batten",You think vazahat is justified.
+You own guns.,You own Object Category OBJ01 objects related to Policy Topic TOP35,You own gloiokesh objects.,You own Bowl objects related to Carton,You own ubqaqvgej objects.
+You like to argue about politics.,You like to argue about Public-Affairs Domain PUBDOM01 related to Policy Topic TOP47,You like to argue about dreeivek.,You like to argue about Bottle related to Basinette,You like to argue about soggazgv.
+You never talk about politics.,You never talk about Public-Affairs Domain PUBDOM01 related to Policy Topic TOP47,You never talk about dreeivek.,You never talk about Bottle related to Basinette,You never talk about soggazgv.
+You like to go fishing or hunting.,You enjoy Activity ACT02,You enjoy krouvar.,You enjoy Gazebo.,You enjoy voqizxo.
+TV PROGRAMS,MEDIA-PROGRAMS,MEDIA-PROGRAMS,MEDIA-PROGRAMS,MEDIA-PROGRAMS
+American Idol,Media Program MEDIA01,zanirov,Acorn,cxhaoqz
+NCIS,Media Program MEDIA02,pelukesh,Flagstone,lgbivgej
+Good Morning America,Media Program MEDIA03,sulixoq,Fiddlewood,eibatqn
+Saturday Night Live,Media Program MEDIA04,joreivra,Newel,mqogazox
+Amor Eterno,Media Program MEDIA05,joruzor,Wallboard,mqoicqo
+The Dave Ramsey Show,Media Program MEDIA06,veliovos,Thread,zgbaqzqe

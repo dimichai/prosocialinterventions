@@ -181,12 +181,13 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
                 log = True,
                 save_full_log = False,
                 no_personas = False,
-                no_bio = False):
+                no_bio = False,
+                wandb_project = "prosocial-interventions"):
 
     persona_label = get_persona_label(personas_file, no_personas, no_bio)
 
     if log:
-        wandb.init(project="prosocial-interventions",
+        wandb.init(project=wandb_project,
             name=f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{persona_label}",
             config={
                 "simulation_size": simulation_size,
@@ -326,6 +327,7 @@ if __name__ == "__main__":
     argparser.add_argument('--save_full_log', action='store_true', default=False, help="Whether to save the full log of the simulation in a json (can be large)")
     argparser.add_argument('--no_personas', action='store_true', default=False, help="Omit the persona description from the agent's system prompt (neutral-agent baseline)")
     argparser.add_argument('--no_bio', action='store_true', default=False, help="Omit the target user's bio when an agent decides whether to follow them")
+    argparser.add_argument("--wandb_project", type=str, default="prosocial-interventions", help="Wandb project to log the run to")
 
     args = argparser.parse_args()
 
@@ -349,5 +351,6 @@ if __name__ == "__main__":
         log = not args.no_log,
         save_full_log=args.save_full_log,
         no_personas=args.no_personas,
-        no_bio=args.no_bio
+        no_bio=args.no_bio,
+        wandb_project=args.wandb_project
     )

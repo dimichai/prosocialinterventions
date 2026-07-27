@@ -20,11 +20,12 @@ class BooleanAction(BaseModel):
 
 class Agent():
 
-    def __init__(self, model: str, persona: dict = None, no_personas: bool = False, no_bio: bool = False):
+    def __init__(self, model: str, persona: dict = None, no_personas: bool = False, no_bio: bool = False, no_news_category: bool = False):
 
         self.persona = persona
         self.no_personas = no_personas
         self.no_bio = no_bio
+        self.no_news_category = no_news_category
 
         self.llm = None
         self.model = model
@@ -173,7 +174,8 @@ class Agent():
         msg += P.PERFORM_ACTION_NEWS_HEADER
 
         for i, news_item in enumerate(news_data, start=1):
-            msg += f"ID: {i}\nTitle: {news_item['headline']}\nCategory: {news_item['category']}\nDescription: {news_item['short_description']}\n\n"
+            category_line = "" if self.no_news_category else f"Category: {news_item['category']}\n"
+            msg += f"ID: {i}\nTitle: {news_item['headline']}\n{category_line}Description: {news_item['short_description']}\n\n"
 
         # Get response and handle the action
 

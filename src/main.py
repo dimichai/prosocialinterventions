@@ -182,6 +182,7 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
                 save_full_log = False,
                 no_personas = False,
                 no_bio = False,
+                no_news_category = False,
                 wandb_project = "prosocial-interventions"):
 
     persona_label = get_persona_label(personas_file, no_personas, no_bio)
@@ -244,7 +245,7 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
         )
 
     # Register users
-    [platform.register_user(Agent(model, user, no_personas=no_personas, no_bio=no_bio)) for user in selected_users]
+    [platform.register_user(Agent(model, user, no_personas=no_personas, no_bio=no_bio, no_news_category=no_news_category)) for user in selected_users]
     platform.set_client(client)
     
     for i in range(simulation_steps):
@@ -327,6 +328,7 @@ if __name__ == "__main__":
     argparser.add_argument('--save_full_log', action='store_true', default=False, help="Whether to save the full log of the simulation in a json (can be large)")
     argparser.add_argument('--no_personas', action='store_true', default=False, help="Omit the persona description from the agent's system prompt (neutral-agent baseline)")
     argparser.add_argument('--no_bio', action='store_true', default=False, help="Omit the target user's bio when an agent decides whether to follow them")
+    argparser.add_argument('--no_news_category', action='store_true', default=False, help="Omit the news category when an agent decides which news to share")
     argparser.add_argument("--wandb_project", type=str, default="prosocial-interventions", help="Wandb project to log the run to")
 
     args = argparser.parse_args()
@@ -352,5 +354,6 @@ if __name__ == "__main__":
         save_full_log=args.save_full_log,
         no_personas=args.no_personas,
         no_bio=args.no_bio,
+        no_news_category=args.no_news_category,
         wandb_project=args.wandb_project
     )

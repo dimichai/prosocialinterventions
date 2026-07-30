@@ -5,7 +5,7 @@ import json
 import random
 import dotenv
 import pandas as pd
-from openai import OpenAI
+from openai import OpenAI, LengthFinishReasonError
 from pydantic import BaseModel
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
@@ -117,26 +117,37 @@ def _system_message(persona: dict) -> str:
     )
 
 
-def ask_question(client: OpenAI, persona: dict, question: str, model: str) -> tuple[bool, str]:
-    """Send a yes/no question to the LLM and return (answer_bool, explanation)."""
+def ask_question(client: OpenAI, persona: dict, question: str, model: str) -> tuple[bool | None, str]:
+    """Send a yes/no question to the LLM and return (answer_bool, explanation).
 
-    response = client.beta.chat.completions.parse(
-        model=model,
-        messages=[
-            {"role": "system", "content": _system_message(persona)},
-            {
-                "role": "user",
-                "content": (
-                    f"{question}\n\n"
-                    "Reply with 'yes' or 'no'. Also provide a short explanation for your answer."
-                ),
-            },
-        ],
-        response_format=BooleanAnswer,
-    )
+    Returns (None, "<error>") if the model's response was truncated before it
+    could produce valid structured output (rare, but happens on some
+    OpenRouter models/personas) rather than raising and aborting the whole run.
+    """
 
-    parsed = response.choices[0].message.parsed
-    return parsed.choice.strip().lower() == "yes", parsed.explanation
+    for attempt in range(2):
+        try:
+            response = client.beta.chat.completions.parse(
+                model=model,
+                messages=[
+                    {"role": "system", "content": _system_message(persona)},
+                    {
+                        "role": "user",
+                        "content": (
+                            f"{question}\n\n"
+                            "Reply with 'yes' or 'no'. Also provide a short explanation for your answer."
+                        ),
+                    },
+                ],
+                response_format=BooleanAnswer,
+                max_tokens=16384,
+            )
+            parsed = response.choices[0].message.parsed
+            return parsed.choice.strip().lower() == "yes", parsed.explanation
+        except LengthFinishReasonError:
+            print(f"    [warn] truncated response on attempt {attempt + 1} for question: {question!r}")
+
+    return None, "ERROR: response truncated (length limit reached) after retry"
 
 
 def ask_feeling_thermometer(client: OpenAI, persona: dict, targets: list[tuple[str, str]], model: str) -> dict:
@@ -149,25 +160,40 @@ def ask_feeling_thermometer(client: OpenAI, persona: dict, targets: list[tuple[s
           "give a whole-number rating between 0 and 100."
     )
 
-    response = client.beta.chat.completions.parse(
-        model=model,
-        messages=[
-            {"role": "system", "content": _system_message(persona)},
-            {"role": "user", "content": prompt},
-        ],
-        response_format=FeelingThermometerAnswer,
-    )
+    for attempt in range(2):
+        try:
+            response = client.beta.chat.completions.parse(
+                model=model,
+                messages=[
+                    {"role": "system", "content": _system_message(persona)},
+                    {"role": "user", "content": prompt},
+                ],
+                response_format=FeelingThermometerAnswer,
+                max_tokens=16384,
+            )
+            parsed = response.choices[0].message.parsed
+            return {
+                "biden_therm_recognized": parsed.biden_recognized,
+                "biden_therm_rating":     parsed.biden_rating,
+                "trump_therm_recognized": parsed.trump_recognized,
+                "trump_therm_rating":     parsed.trump_rating,
+                "democrats_therm_recognized":   parsed.democrats_recognized,
+                "democrats_therm_rating":       parsed.democrats_rating,
+                "republicans_therm_recognized": parsed.republicans_recognized,
+                "republicans_therm_rating":     parsed.republicans_rating,
+            }
+        except LengthFinishReasonError:
+            print(f"    [warn] truncated thermometer response on attempt {attempt + 1}")
 
-    parsed = response.choices[0].message.parsed
     return {
-        "biden_therm_recognized": parsed.biden_recognized,
-        "biden_therm_rating":     parsed.biden_rating,
-        "trump_therm_recognized": parsed.trump_recognized,
-        "trump_therm_rating":     parsed.trump_rating,
-        "democrats_therm_recognized":   parsed.democrats_recognized,
-        "democrats_therm_rating":       parsed.democrats_rating,
-        "republicans_therm_recognized": parsed.republicans_recognized,
-        "republicans_therm_rating":     parsed.republicans_rating,
+        "biden_therm_recognized": None,
+        "biden_therm_rating":     None,
+        "trump_therm_recognized": None,
+        "trump_therm_rating":     None,
+        "democrats_therm_recognized":   None,
+        "democrats_therm_rating":       None,
+        "republicans_therm_recognized": None,
+        "republicans_therm_rating":     None,
     }
 
 
@@ -228,6 +254,9 @@ def interview_personas(
         row.update(ask_feeling_thermometer(client, persona, thermometer_targets, model))
 
         results.append(row)
+
+        if (i + 1) % 20 == 0:
+            pd.DataFrame(results).to_csv(output_file, index=False)
 
     df = pd.DataFrame(results)
     df.to_csv(output_file, index=False)

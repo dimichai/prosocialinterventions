@@ -4,58 +4,11 @@ import sys
 import json
 import random
 import dotenv
-import matplotlib.pyplot as plt
 import pandas as pd
 from openai import OpenAI
 from pydantic import BaseModel
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
-
-
-plt.rcParams.update({
-    # Font
-    'font.family': 'sans-serif',
-    'font.sans-serif': ['Arial', 'Helvetica', 'DejaVu Sans'],
-    'font.size': 12,
-    'axes.titlesize': 14,
-    'axes.titleweight': 'medium',
-    'axes.labelsize': 12,
-    'xtick.labelsize': 11,
-    'ytick.labelsize': 11,
-    'legend.fontsize': 11,
-    'figure.titlesize': 16,
-    'figure.titleweight': 'medium',
-    # Axes
-    'axes.linewidth': 1.0,
-    'axes.spines.top': False,
-    'axes.spines.right': False,
-    'axes.grid': False,
-    'axes.axisbelow': True,
-    # Ticks
-    'xtick.major.width': 1.0,
-    'ytick.major.width': 1.0,
-    'xtick.major.size': 4,
-    'ytick.major.size': 4,
-    'xtick.direction': 'out',
-    'ytick.direction': 'out',
-    # Lines & patches
-    'lines.linewidth': 1.5,
-    'patch.edgecolor': 'white',
-    'patch.linewidth': 0.5,
-    # Grid (used selectively)
-    'grid.color': '#333333',
-    'grid.alpha': 0.15,
-    'grid.linestyle': '-',
-    # Figure
-    'figure.dpi': 150,
-    'savefig.dpi': 300,
-    'savefig.bbox': 'tight',
-    'savefig.facecolor': 'white',
-    'figure.facecolor': 'white',
-    # PDF/PS export with editable text
-    'pdf.fonttype': 42,
-    'ps.fonttype': 42,
-})
 
 
 # (key_suffix, trait) — asked once for Democrats and once for Republicans
@@ -237,81 +190,6 @@ def interview_personas(
     return df
 
 
-def plot_by_party(
-    df: pd.DataFrame,
-    questions: list[tuple[str, str]],
-    thermometer_targets: list[tuple[str, str]],
-    personas_setting: str,
-    sample_suffix: str,
-) -> None:
-    figs_dir = os.path.join(os.path.dirname(__file__), "figs")
-    os.makedirs(figs_dir, exist_ok=True)
-
-    # Convert answer columns to 0/1 — works for any dtype pandas may give us
-    answer_cols    = [f"{k}_answer" for k, _ in questions if f"{k}_answer" in df.columns]
-    question_texts = [t for k, t in questions if f"{k}_answer" in df.columns]
-
-    for col in answer_cols:
-        df[col] = df[col].astype(str).str.strip().str.lower().eq("true").astype(int)
-
-    groups = sorted(df["party"].dropna().unique())
-
-    fig, axes = plt.subplots(1, len(answer_cols), figsize=(4 * len(answer_cols), 5), sharey=True)
-    if len(answer_cols) == 1:
-        axes = [axes]
-
-    for ax, col, text in zip(axes, answer_cols, question_texts):
-        yes_vals = [df[df["party"] == g][col].mean() for g in groups]
-        no_vals  = [1 - v for v in yes_vals]
-
-        ax.bar(groups, yes_vals, color="#3C97DA")
-        ax.bar(groups, no_vals,  color="#FE9D51", bottom=yes_vals)
-        ax.set_ylim(0, 1)
-        ax.set_title(text, fontsize=8, wrap=True)
-        ax.tick_params(axis="x", rotation=15)
-
-    axes[0].set_ylabel("Fraction")
-    handles = [plt.Rectangle((0, 0), 1, 1, color=c) for c in ["#4878A8", "#D45500"]]
-    fig.legend(handles, ["Yes", "No"], loc="upper right", frameon=False)
-    fig.suptitle("Yes/No answers by party", fontsize=11)
-    plt.tight_layout()
-    answers_path = os.path.join(figs_dir, f"persona_interview_results_{personas_setting}{sample_suffix}_by_party.png")
-    plt.savefig(answers_path, bbox_inches="tight", dpi=150)
-    plt.close(fig)
-    print(f"Saved plot to {answers_path}")
-
-    therm_cols = [(f"{role}_therm_rating", label) for role, label in thermometer_targets
-                  if f"{role}_therm_rating" in df.columns]
-
-    fig, axes = plt.subplots(1, len(therm_cols), figsize=(4 * len(therm_cols), 5), sharey=True)
-    if len(therm_cols) == 1:
-        axes = [axes]
-
-    for ax, (col, label) in zip(axes, therm_cols):
-        means, errs = [], []
-        for g in groups:
-            subset = df.loc[df["party"] == g, col].dropna()
-            if len(subset) == 0:
-                means.append(float("nan")); errs.append(float("nan"))
-                continue
-            means.append(subset.mean())
-            errs.append(1.96 * subset.std(ddof=1) / len(subset) ** 0.5)
-        ax.bar(groups, means, yerr=errs, color="#3C97DA", capsize=4)
-        ax.set_ylim(0, 100)
-        ax.set_title(f"Feeling thermometer:\n{label}", fontsize=10)
-        ax.tick_params(axis="x", rotation=15)
-
-    axes[0].set_ylabel("Mean rating (0-100)")
-    fig.suptitle("Feeling thermometer ratings by party", fontsize=11)
-    plt.tight_layout()
-    therm_path = os.path.join(
-        figs_dir, f"persona_interview_thermometer_results_{personas_setting}{sample_suffix}_by_party.png"
-    )
-    plt.savefig(therm_path, bbox_inches="tight", dpi=150)
-    plt.close(fig)
-    print(f"Saved plot to {therm_path}")
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Interview personas and plot yes/no + feeling-thermometer results by party.")
     parser.add_argument("--personas_setting", type=str,
@@ -343,8 +221,6 @@ def main() -> None:
         persona_sample=args.persona_sample,
         seed=args.seed,
     )
-
-    plot_by_party(df, QUESTIONS, THERMOMETER_TARGETS, personas_setting, sample_suffix)
 
 
 if __name__ == "__main__":

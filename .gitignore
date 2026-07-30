@@ -3,6 +3,7 @@
 results/*
 src/__pycache__/*
 analysis/__pycache__/*
+analysis/persona_interviews/__pycache__/*
 src/wandb/*
 wandb/*
 src/20260121_personas_with_bio_2000_noLoveHate_.json
@@ -16,7 +17,8 @@ src/20260305_personas_with_bio_2000_noBioLoveHate_noBioPartyId_noBioVoted2020_.j
 src/News_Category_Dataset_v3.json
 analysis/artifacts/*
 .claude/settings.local.json
-analysis/persona_interview_results*
+analysis/persona_interviews/results/*
+analysis/persona_interviews/figs/*
 .gitignore
 analysis/figs/*
 PersonaGeneration/anes_timeseries_2020_csv_20220210.csv

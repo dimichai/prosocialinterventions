@@ -81,13 +81,15 @@ def compute_metrics(platform, step, cost_input, cost_output, cost_cached, comput
     metrics["total_tokens_output"] = total_output
     metrics["total_tokens_cached"] = total_cached
 
-    # Clustering coefficient
+    # Clustering coefficient, density and reciprocity
     if len(platform.user_links) > 0 and compute_clustering:
         G = nx.DiGraph()
         G.add_nodes_from([u.identifier for u in platform.users])
         G.add_edges_from(platform.user_links)
         cluster_coeff = nx.clustering(G)
         metrics["avg_clustering_coefficient"] = np.mean(list(cluster_coeff.values()))
+        metrics["network_density"] = nx.density(G)
+        metrics["network_reciprocity"] = nx.overall_reciprocity(G)
 
     # Action distribution
     for action_type, count in action_counts.items():

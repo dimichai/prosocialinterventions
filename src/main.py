@@ -81,13 +81,11 @@ def compute_metrics(platform, step, cost_input, cost_output, cost_cached, comput
     metrics["total_tokens_output"] = total_output
     metrics["total_tokens_cached"] = total_cached
 
-    # Clustering coefficient, density and reciprocity
-    if len(platform.user_links) > 0 and compute_clustering:
+    # Network density, reciprocity and modularity (cheap, computed every step)
+    if len(platform.user_links) > 0:
         G = nx.DiGraph()
         G.add_nodes_from([u.identifier for u in platform.users])
         G.add_edges_from(platform.user_links)
-        cluster_coeff = nx.clustering(G)
-        metrics["avg_clustering_coefficient"] = np.mean(list(cluster_coeff.values()))
         metrics["network_density"] = nx.density(G)
         metrics["network_reciprocity"] = nx.overall_reciprocity(G)
 
@@ -97,6 +95,11 @@ def compute_metrics(platform, step, cost_input, cost_output, cost_cached, comput
         communities = [c for c in (democrats, republicans, others) if c]
         if len(communities) > 1:
             metrics["modularity_dem_rep"] = nx.community.modularity(G, communities)
+
+        # Clustering coefficient is expensive, so it's only computed periodically
+        if compute_clustering:
+            cluster_coeff = nx.clustering(G)
+            metrics["avg_clustering_coefficient"] = np.mean(list(cluster_coeff.values()))
 
     # Action distribution
     for action_type, count in action_counts.items():

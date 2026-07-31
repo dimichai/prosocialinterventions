@@ -91,6 +91,13 @@ def compute_metrics(platform, step, cost_input, cost_output, cost_cached, comput
         metrics["network_density"] = nx.density(G)
         metrics["network_reciprocity"] = nx.overall_reciprocity(G)
 
+        democrats = {u.identifier for u in platform.users if u.persona['party'] == 'Democrat'}
+        republicans = {u.identifier for u in platform.users if u.persona['party'] == 'Republican'}
+        others = set(G.nodes()) - democrats - republicans
+        communities = [c for c in (democrats, republicans, others) if c]
+        if len(communities) > 1:
+            metrics["modularity_dem_rep"] = nx.community.modularity(G, communities)
+
     # Action distribution
     for action_type, count in action_counts.items():
         metrics[f"action_{action_type}"] = count

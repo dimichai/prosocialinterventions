@@ -66,7 +66,7 @@ def obf(value, mapping):
 
 
 # This code fetches lines from the ANES, and returns as readable dict
-def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=False, ignore_voted2020=False, ignore_voted2020_year=False, obfuscation='none', seed=42):
+def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=False, ignore_voted2020=False, ignore_voted2020_year=False, ignore_age=False, obfuscation='none', seed=42):
 
     obfuscation_map = load_obfuscation_map(obfuscation)
 
@@ -611,8 +611,8 @@ def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=Fal
                 incomeclass = 'high income'
             l['persona'] += f"You are {obf(incomeclass, obfuscation_map)}.\n"
 
-        if d['V201507x'] is not None:
-            l['persona'] += f"Age: {d['V201507x']}.\n" 
+        if not ignore_age and d['V201507x'] is not None:
+            l['persona'] += f"Age: {d['V201507x']}.\n"
         
         religions = {1: 'Protestant', 2: 'Evangelical Protestant', 3: 'Black Protestant', 4: 'Protestant',  5: 'Catholic', 6: 'Christian', 7: 'Jewish', 9: 'not religious'}
         l['religion'] = d['V201458x']
@@ -746,7 +746,8 @@ Please answer in the format I gave you. I will give you the persona now.
         messages=[
             {"role": "system", "content": prompt},
         ],
-        response_format=Response
+        response_format=Response,
+        temperature=1.0,
     )
 
     response_class = response.choices[0].message.parsed
@@ -779,7 +780,8 @@ You may add things that are not in the persona. Do not use emoji. Write as if yo
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": prompt},
-        ]
+        ],
+        temperature=1.0,
     )
 
     persona['biography'] = response.choices[0].message.content
@@ -792,6 +794,7 @@ if __name__ == "__main__":
     argparser.add_argument("--ignore_party_identity", action='store_true', default=False, help="Whether to ignore party identity info")
     argparser.add_argument("--ignore_voted2020", action='store_true', default=False, help="Whether to ignore voted2020 info")
     argparser.add_argument("--ignore_voted2020_year", action='store_true', default=False, help="Whether to omit 'in 2020' from the voted2020 sentence (candidate/no-vote is still stated)")
+    argparser.add_argument("--ignore_age", action='store_true', default=False, help="Whether to omit the age sentence from the persona text")
     argparser.add_argument("--ignore_extend_with_ai", action='store_true', default=False, help="Whether to skip extending personas with AI-generated occupation/hobbies")
     # Here, the parameters control what is added to the public bio of the agent. The persona generation always uses all info.
     argparser.add_argument("--ignore_bio_love_hate", action='store_true', default=False, help="Whether to ignore love/hate lists in bio")
@@ -811,6 +814,7 @@ if __name__ == "__main__":
                             ignore_party_identity=args.ignore_party_identity,
                             ignore_voted2020=args.ignore_voted2020,
                             ignore_voted2020_year=args.ignore_voted2020_year,
+                            ignore_age=args.ignore_age,
                             obfuscation=args.obfuscation,
                             seed=args.seed)
 
@@ -820,6 +824,7 @@ if __name__ == "__main__":
         f"{'noPartyId_' if args.ignore_party_identity else ''}"
         f"{'noVoted2020_' if args.ignore_voted2020 else ''}"
         f"{'noVoted2020Year_' if args.ignore_voted2020_year else ''}"
+        f"{'noAge_' if args.ignore_age else ''}"
         f"{'noExtendWithAi_' if args.ignore_extend_with_ai else ''}"
         f"{'noBioLoveHate_' if args.ignore_bio_love_hate else ''}"
         f"{'noBioPartyId_' if args.ignore_bio_party_identity else ''}"
@@ -850,6 +855,7 @@ if __name__ == "__main__":
         f"{'noPartyId_' if args.ignore_party_identity else ''}"
         f"{'noVoted2020_' if args.ignore_voted2020 else ''}"
         f"{'noVoted2020Year_' if args.ignore_voted2020_year else ''}"
+        f"{'noAge_' if args.ignore_age else ''}"
         f"{'noExtendWithAi_' if args.ignore_extend_with_ai else ''}"
         f"{'noBioLoveHate_' if args.ignore_bio_love_hate else ''}"
         f"{'noBioPartyId_' if args.ignore_bio_party_identity else ''}"

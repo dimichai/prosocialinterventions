@@ -96,6 +96,7 @@ COMPARISON_FILES = {
 }
 COMPARISON_OUTPUT_BARS = os.path.join(os.path.dirname(__file__), "figs", "interview_results_obfuscation.pdf")
 COMPARISON_OUTPUT_TRAITS = os.path.join(os.path.dirname(__file__), "figs", "interview_results_obfuscation_traits.pdf")
+COMPARISON_OUTPUT_TRAITS_DONTKNOW = os.path.join(os.path.dirname(__file__), "figs", "interview_results_obfuscation_traits_dont_know.pdf")
 COMPARISON_OUTPUT_THERM = os.path.join(os.path.dirname(__file__), "figs", "interview_results_obfuscation_thermometer.pdf")
 COMPARISON_OUTPUT_POLARIZATION = os.path.join(os.path.dirname(__file__), "figs", "interview_results_obfuscation_affective_polarization.pdf")
 
@@ -105,7 +106,12 @@ def load_and_prepare(path: str) -> pd.DataFrame:
     for k, _ in QUESTIONS:
         col = f"{k}_answer"
         if col in df.columns:
-            df[col] = df[col].astype(str).str.strip().str.lower().eq("true").astype(int)
+            normalized = df[col].astype(str).str.strip().str.lower()
+            # Trait questions allow a "dont_know" answer (see persona_interviews_obfuscation.py).
+            # Map it (and any error rows) to NaN rather than 0, so it doesn't get
+            # silently counted as "No" in the yes/no fraction below.
+            df[f"{col}_dont_know"] = normalized.eq("dont_know")
+            df[col] = normalized.map({"true": 1.0, "false": 0.0})
 
     # Affective polarization: rating given to the respondent's own party minus
     # the rating given to the opposing party (only defined for partisans).
@@ -125,11 +131,16 @@ def plot_answer_comparison(
     condition_colors: dict[str, str],
     output_path: str,
     ncols: int | None = None,
+    ylabel: str = "Fraction answering Yes",
 ) -> None:
     """Grouped bar chart of fraction-answering-Yes per party, one panel per question.
 
     Panels wrap onto multiple rows (ncols per row) so this scales from a
     handful of questions up to a full trait battery without one absurdly wide row.
+
+    `col` values may contain NaN (e.g. trait "dont_know" answers, recoded to NaN
+    in load_and_prepare) — those rows are excluded from both the fraction and its
+    denominator `n`, rather than being counted as "No".
     """
     n_questions = len(cols)
     if n_questions == 0:
@@ -155,9 +166,9 @@ def plot_answer_comparison(
             vals, errs = [], []
             for party in all_parties:
                 subset = dfs[label][dfs[label]["party"] == party][col]
-                if party in dfs[label]["party"].values and len(subset) > 0:
+                n = int(subset.notna().sum())
+                if party in dfs[label]["party"].values and n > 0:
                     p = subset.mean()
-                    n = len(subset)
                     vals.append(p)
                     errs.append(1.96 * (p * (1 - p) / n) ** 0.5)
                 else:
@@ -179,7 +190,7 @@ def plot_answer_comparison(
     for ax in flat_axes[n_questions:]:
         ax.axis("off")
     for row in range(nrows):
-        axes[row, 0].set_ylabel("Fraction answering Yes")
+        axes[row, 0].set_ylabel(ylabel)
 
     handles = [plt.Rectangle((0, 0), 1, 1, color=condition_colors.get(l, "#888888")) for l in labels]
     fig.legend(handles, labels, loc="upper right", frameon=False)
@@ -353,6 +364,13 @@ def main() -> None:
     # comparison file) so conditions with extra questions still get reported.
     all_answer_cols = follow_cols + trait_cols
 
+    dont_know_cols = [f"{c}_dont_know" for c in trait_cols]
+    dont_know_present = [
+        (c, question_labels.get(c.replace('_answer_dont_know', ''),
+                                 question_texts.get(c.replace('_answer_dont_know', ''), c)) + "\n(don't know)")
+        for c in dont_know_cols if all(c in df.columns for df in dfs.values())
+    ]
+
     all_parties = sorted(set().union(*[set(df["party"].dropna().unique()) for df in dfs.values()]))
     labels      = list(dfs.keys())
 
@@ -368,6 +386,11 @@ def main() -> None:
     # Trait battery: one row for Democrats, one for Republicans, columns aligned by trait.
     plot_answer_comparison(dfs, trait_present, all_parties, condition_colors,
                             COMPARISON_OUTPUT_TRAITS, ncols=len(TRAIT_QUESTIONS))
+    # Trait "dont_know" rate: makes forced-choice artifacts (non-partisans with no
+    # basis to judge an obfuscated group) visible instead of them defaulting to "No".
+    plot_answer_comparison(dfs, dont_know_present, all_parties, condition_colors,
+                            COMPARISON_OUTPUT_TRAITS_DONTKNOW, ncols=len(TRAIT_QUESTIONS),
+                            ylabel="Fraction answering \"don't know\"")
 
     for label, df in dfs.items():
         print(f"\n{'='*60}")
@@ -379,12 +402,17 @@ def main() -> None:
             key = col.replace("_answer", "")
             q_text = question_labels.get(key, question_texts.get(key, col)).replace("\n", " ")
             print(f"\n  {q_text}")
+            dont_know_col = f"{col}_dont_know"
             for party in all_parties:
                 subset = df[df["party"] == party]
                 if len(subset) == 0:
                     continue
-                pct = subset[col].mean() * 100
-                print(f"    {party:<30} {pct:5.1f}%  (n={len(subset)})")
+                n_decided = int(subset[col].notna().sum())
+                pct_str = f"{subset[col].mean() * 100:5.1f}%" if n_decided > 0 else "  n/a"
+                line = f"    {party:<30} {pct_str}  (n={n_decided}"
+                if col in trait_cols and dont_know_col in df.columns:
+                    line += f", dont_know={subset[dont_know_col].mean() * 100:4.1f}%"
+                print(line + ")")
 
     plot_thermometer_comparison(dfs, all_parties, condition_colors)
     plot_affective_polarization_comparison(dfs, condition_colors)

@@ -3,6 +3,8 @@ import os
 import sys
 import json
 import random
+from typing import Literal
+
 import dotenv
 import pandas as pd
 from openai import OpenAI, LengthFinishReasonError
@@ -95,7 +97,16 @@ def build_thermometer_targets(
 
 
 class BooleanAnswer(BaseModel):
-    choice: str        # "yes" or "no"
+    choice: Literal["yes", "no"]
+    explanation: str
+
+
+class TraitAnswer(BaseModel):
+    # Trait questions ask a persona to characterize an entire political party.
+    # Under obfuscation, a non-partisan may genuinely have no basis to judge
+    # the (obfuscated) group, so we let them opt out instead of forcing a "no"
+    # that would be indistinguishable from genuine negativity.
+    choice: Literal["yes", "no", "dont_know"]
     explanation: str
 
 
@@ -111,13 +122,28 @@ def _system_message(persona: dict) -> str:
     )
 
 
-def ask_question(client: OpenAI, persona: dict, question: str, model: str) -> tuple[bool | None, str]:
-    """Send a yes/no question to the LLM and return (answer_bool, explanation).
+def ask_question(
+    client: OpenAI, persona: dict, question: str, model: str, allow_dont_know: bool = False
+) -> tuple[bool | str | None, str]:
+    """Send a question to the LLM and return (answer, explanation).
+
+    `answer` is True/False for a yes/no question. When `allow_dont_know` is set
+    (used for the trait battery), the persona may instead answer "dont_know",
+    returned as the literal string "dont_know" rather than being coerced into
+    a boolean.
 
     Returns (None, "<error>") if the model's response was truncated before it
     could produce valid structured output (rare, but happens on some
     OpenRouter models/personas) rather than raising and aborting the whole run.
     """
+
+    response_format = TraitAnswer if allow_dont_know else BooleanAnswer
+    instruction = (
+        "Reply with 'yes', 'no', or 'dont_know' if you don't know enough about "
+        "this group to have an opinion. Also provide a short explanation for your answer."
+        if allow_dont_know else
+        "Reply with 'yes' or 'no'. Also provide a short explanation for your answer."
+    )
 
     for attempt in range(2):
         try:
@@ -125,19 +151,17 @@ def ask_question(client: OpenAI, persona: dict, question: str, model: str) -> tu
                 model=model,
                 messages=[
                     {"role": "system", "content": _system_message(persona)},
-                    {
-                        "role": "user",
-                        "content": (
-                            f"{question}\n\n"
-                            "Reply with 'yes' or 'no'. Also provide a short explanation for your answer."
-                        ),
-                    },
+                    {"role": "user", "content": f"{question}\n\n{instruction}"},
                 ],
-                response_format=BooleanAnswer,
+                response_format=response_format,
                 max_tokens=16384,
+                temperature=1.0,
             )
             parsed = response.choices[0].message.parsed
-            return parsed.choice.strip().lower() == "yes", parsed.explanation
+            choice = parsed.choice.strip().lower()
+            if choice == "dont_know":
+                return "dont_know", parsed.explanation
+            return choice == "yes", parsed.explanation
         except LengthFinishReasonError:
             print(f"    [warn] truncated response on attempt {attempt + 1} for question: {question!r}")
 
@@ -164,6 +188,7 @@ def ask_feeling_thermometer_single(client: OpenAI, persona: dict, label: str, mo
                 ],
                 response_format=ThermometerAnswer,
                 max_tokens=16384,
+                temperature=1.0,
             )
             parsed = response.choices[0].message.parsed
             return parsed.recognized, parsed.rating
@@ -235,8 +260,9 @@ def interview_personas(
         }
 
         for key, question in active_questions:
-            answer, explanation = ask_question(client, persona, question, model)
-            row[f"{key}_answer"]      = answer          # True / False
+            allow_dont_know = key.startswith(("dem_", "rep_"))
+            answer, explanation = ask_question(client, persona, question, model, allow_dont_know=allow_dont_know)
+            row[f"{key}_answer"]      = answer          # True / False / "dont_know"
             row[f"{key}_explanation"] = explanation
 
         row.update(ask_feeling_thermometer(client, persona, thermometer_targets, model))

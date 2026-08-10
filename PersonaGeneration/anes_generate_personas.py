@@ -66,7 +66,7 @@ def obf(value, mapping):
 
 
 # This code fetches lines from the ANES, and returns as readable dict
-def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=False, ignore_voted2020=False, obfuscation='none', seed=42):
+def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=False, ignore_voted2020=False, ignore_voted2020_year=False, obfuscation='none', seed=42):
 
     obfuscation_map = load_obfuscation_map(obfuscation)
 
@@ -650,11 +650,12 @@ def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=Fal
 
         if not ignore_voted2020:
             if d['vote2020'] in ['Donald Trump','Joe Biden']:
-                l['persona'] += f"You voted for {obf(d['vote2020'], obfuscation_map)} in 2020.\n"
+                year_suffix = "" if ignore_voted2020_year else " in 2020"
+                l['persona'] += f"You voted for {obf(d['vote2020'], obfuscation_map)}{year_suffix}.\n"
                 l['voted2020'] = True
                 l['voted2020_for'] = d['vote2020']
             else:
-                l['persona'] += "You didn't vote in 2020.\n"
+                l['persona'] += ("You didn't vote.\n" if ignore_voted2020_year else "You didn't vote in 2020.\n")
                 l['voted2020'] = False
         if not ignore_party_identity:
             #Generate party affiliation
@@ -790,6 +791,7 @@ if __name__ == "__main__":
     argparser.add_argument("--ignore_love_hate", action='store_true', default=False, help="Whether to ignore love/hate lists")
     argparser.add_argument("--ignore_party_identity", action='store_true', default=False, help="Whether to ignore party identity info")
     argparser.add_argument("--ignore_voted2020", action='store_true', default=False, help="Whether to ignore voted2020 info")
+    argparser.add_argument("--ignore_voted2020_year", action='store_true', default=False, help="Whether to omit 'in 2020' from the voted2020 sentence (candidate/no-vote is still stated)")
     argparser.add_argument("--ignore_extend_with_ai", action='store_true', default=False, help="Whether to skip extending personas with AI-generated occupation/hobbies")
     # Here, the parameters control what is added to the public bio of the agent. The persona generation always uses all info.
     argparser.add_argument("--ignore_bio_love_hate", action='store_true', default=False, help="Whether to ignore love/hate lists in bio")
@@ -808,6 +810,7 @@ if __name__ == "__main__":
                             ignore_love_hate=args.ignore_love_hate,
                             ignore_party_identity=args.ignore_party_identity,
                             ignore_voted2020=args.ignore_voted2020,
+                            ignore_voted2020_year=args.ignore_voted2020_year,
                             obfuscation=args.obfuscation,
                             seed=args.seed)
 
@@ -816,6 +819,7 @@ if __name__ == "__main__":
         f"{'noLoveHate_' if args.ignore_love_hate else ''}"
         f"{'noPartyId_' if args.ignore_party_identity else ''}"
         f"{'noVoted2020_' if args.ignore_voted2020 else ''}"
+        f"{'noVoted2020Year_' if args.ignore_voted2020_year else ''}"
         f"{'noExtendWithAi_' if args.ignore_extend_with_ai else ''}"
         f"{'noBioLoveHate_' if args.ignore_bio_love_hate else ''}"
         f"{'noBioPartyId_' if args.ignore_bio_party_identity else ''}"
@@ -845,6 +849,7 @@ if __name__ == "__main__":
         f"{'noLoveHate_' if args.ignore_love_hate else ''}"
         f"{'noPartyId_' if args.ignore_party_identity else ''}"
         f"{'noVoted2020_' if args.ignore_voted2020 else ''}"
+        f"{'noVoted2020Year_' if args.ignore_voted2020_year else ''}"
         f"{'noExtendWithAi_' if args.ignore_extend_with_ai else ''}"
         f"{'noBioLoveHate_' if args.ignore_bio_love_hate else ''}"
         f"{'noBioPartyId_' if args.ignore_bio_party_identity else ''}"

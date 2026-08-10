@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import json
 from datetime import datetime
@@ -7,6 +8,8 @@ from pydantic import BaseModel
 from typing import List
 import random
 import argparse
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Create response format
 class Response(BaseModel):
@@ -43,7 +46,7 @@ def load_obfuscation_map(mode):
     if mode == 'none':
         return {}
 
-    df = pd.read_csv('persona_obfuscations.csv')
+    df = pd.read_csv(os.path.join(SCRIPT_DIR, 'persona_obfuscations.csv'))
     col = OBFUSCATION_COLUMNS[mode]
 
     mapping = {}
@@ -70,7 +73,7 @@ def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=Fal
 
     obfuscation_map = load_obfuscation_map(obfuscation)
 
-    df = pd.read_csv('anes_timeseries_2020_csv_20220210.csv', low_memory=False)
+    df = pd.read_csv(os.path.join(SCRIPT_DIR, 'anes_timeseries_2020_csv_20220210.csv'), low_memory=False)
 
     df1 = df
     # V202545 how often post polituical content on twitter?
@@ -786,8 +789,7 @@ You may add things that are not in the persona. Do not use emoji. Write as if yo
 
     persona['biography'] = response.choices[0].message.content
 
-if __name__ == "__main__":
-    
+def build_argparser() -> argparse.ArgumentParser:
     argparser = argparse.ArgumentParser()
     argparser.add_argument("--num_personas", type=int, default=2000, help="Number of personas to generate")
     argparser.add_argument("--ignore_love_hate", action='store_true', default=False, help="Whether to ignore love/hate lists")
@@ -802,7 +804,13 @@ if __name__ == "__main__":
     argparser.add_argument("--ignore_bio_voted2020", action='store_true', default=False, help="Whether to ignore voted2020 info in bio")
     argparser.add_argument("--obfuscation", choices=['none', 'neutral', 'nonce', 'randomreal', 'randomnonce'], default='none', help="Obfuscate identifying terms in the persona text: none (as-is), neutral (generic labels), nonce (meaningless tokens), randomreal (random real terms), randomnonce (random meaningless tokens)")
     argparser.add_argument("--seed", type=int, default=42, help="Random seed for persona sampling and AI extension choices")
-    args = argparser.parse_args()
+    return argparser
+
+
+def generate_personas_cli(args: argparse.Namespace) -> dict:
+    """Run the full generate -> extend-with-AI -> add-biography pipeline for one
+    obfuscation condition and write both output JSON files to PersonaGeneration/,
+    same as the CLI has always done. Returns their absolute paths."""
 
     random.seed(args.seed)
 
@@ -832,13 +840,14 @@ if __name__ == "__main__":
         f"{'obf' + OBFUSCATION_LABELS[args.obfuscation] + '_' if args.obfuscation != 'none' else ''}"
         ".json"
     )
-    json.dump(personas, open(personas_file_name,"w"))
+    personas_file_path = os.path.join(SCRIPT_DIR, personas_file_name)
+    json.dump(personas, open(personas_file_path,"w"))
 
-    dotenv.load_dotenv('../.env')
+    dotenv.load_dotenv(os.path.join(SCRIPT_DIR, '..', '.env'))
 
     client = openai.OpenAI()
 
-    personas = json.load(open(personas_file_name))
+    personas = json.load(open(personas_file_path))
     i=1
     for persona in personas:
         print(i)
@@ -863,5 +872,16 @@ if __name__ == "__main__":
         f"{'obf' + OBFUSCATION_LABELS[args.obfuscation] + '_' if args.obfuscation != 'none' else ''}"
         ".json"
     )
-    with open(filename, "w") as f:
+    personas_with_bio_path = os.path.join(SCRIPT_DIR, filename)
+    with open(personas_with_bio_path, "w") as f:
         json.dump(personas, f)
+
+    return {
+        "personas_file": personas_file_path,
+        "personas_with_bio_file": personas_with_bio_path,
+    }
+
+
+if __name__ == "__main__":
+    args = build_argparser().parse_args()
+    generate_personas_cli(args)

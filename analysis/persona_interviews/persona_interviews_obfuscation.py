@@ -417,11 +417,18 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
-    args = parse_args()
-    personas_setting = args.personas_setting
-    sample_suffix = f"_sample{args.persona_sample}" if args.persona_sample else ""
-    seed_suffix = f"_avg{len(args.seed)}seeds" if len(args.seed) > 1 else ""
+def run_interview_for_setting(
+    personas_setting: str,
+    model: str,
+    persona_sample: int | None,
+    seeds: list[int],
+) -> str:
+    """Interview the personas in src/<personas_setting>.json (one or more seeds,
+    averaged if more than one) and write the results CSV to results/, same as the
+    CLI has always done. Returns the output CSV's absolute path."""
+
+    sample_suffix = f"_sample{persona_sample}" if persona_sample else ""
+    seed_suffix = f"_avg{len(seeds)}seeds" if len(seeds) > 1 else ""
 
     trump_label, biden_label = get_political_figure_labels(personas_setting)
     democrats_label, republicans_label = get_party_labels(personas_setting)
@@ -431,36 +438,43 @@ def main() -> None:
     personas_file = os.path.join(os.path.dirname(__file__), f"../../src/{personas_setting}.json")
     output_file   = os.path.join(os.path.dirname(__file__), "results", f"persona_interview_results_{personas_setting}{sample_suffix}{seed_suffix}.csv")
 
-    if len(args.seed) == 1:
+    if len(seeds) == 1:
         df = interview_personas(
             personas_file=personas_file,
             output_file=output_file,
             questions=questions,
             thermometer_targets=thermometer_targets,
-            model=args.model,
-            persona_sample=args.persona_sample,
-            seed=args.seed[0],
+            model=model,
+            persona_sample=persona_sample,
+            seed=seeds[0],
         )
     else:
-        if args.persona_sample is None:
+        if persona_sample is None:
             print("Note: --persona_sample not set, so each seed re-interviews the full "
                   "population; averaging captures run-to-run LLM variability rather than "
                   "sampling variance.")
         dfs = []
-        for i, seed in enumerate(args.seed):
-            print(f"=== Seed {i + 1}/{len(args.seed)} (seed={seed}) ===")
+        for i, seed in enumerate(seeds):
+            print(f"=== Seed {i + 1}/{len(seeds)} (seed={seed}) ===")
             dfs.append(interview_personas(
                 personas_file=personas_file,
                 output_file=None,
                 questions=questions,
                 thermometer_targets=thermometer_targets,
-                model=args.model,
-                persona_sample=args.persona_sample,
+                model=model,
+                persona_sample=persona_sample,
                 seed=seed,
             ))
         df = aggregate_interview_runs(dfs, questions, thermometer_targets)
         df.to_csv(output_file, index=False)
-        print(f"Averaged results across {len(args.seed)} seeds saved to {output_file}")
+        print(f"Averaged results across {len(seeds)} seeds saved to {output_file}")
+
+    return output_file
+
+
+def main() -> None:
+    args = parse_args()
+    run_interview_for_setting(args.personas_setting, args.model, args.persona_sample, args.seed)
 
 
 if __name__ == "__main__":

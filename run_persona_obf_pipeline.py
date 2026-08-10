@@ -44,6 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ignore_voted2020_year", action='store_true', default=False, help="Whether to omit 'in 2020' from the voted2020 sentence (candidate/no-vote is still stated)")
     parser.add_argument("--ignore_age", action='store_true', default=False, help="Whether to omit the age sentence from the persona text")
     parser.add_argument("--ignore_extend_with_ai", action='store_true', default=False, help="Whether to skip extending personas with AI-generated occupation/hobbies")
+    parser.add_argument("--ignore_bio", action='store_true', default=False, help="Whether to skip generating a biography for the persona entirely")
     parser.add_argument("--gen_seed", type=int, default=42, help="Random seed for persona sampling and AI extension choices")
 
     parser.add_argument("--obfuscations", nargs="+", choices=OBFUSCATION_CHOICES, default=list(OBFUSCATION_CHOICES),
@@ -64,7 +65,7 @@ def main() -> None:
 
     gen_arg_names = [
         "num_personas", "ignore_love_hate", "ignore_party_identity", "ignore_voted2020",
-        "ignore_voted2020_year", "ignore_age", "ignore_extend_with_ai",
+        "ignore_voted2020_year", "ignore_age", "ignore_extend_with_ai", "ignore_bio",
         "ignore_bio_love_hate", "ignore_bio_party_identity", "ignore_bio_voted2020",
     ]
 

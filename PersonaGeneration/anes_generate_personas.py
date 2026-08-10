@@ -798,6 +798,7 @@ def build_argparser() -> argparse.ArgumentParser:
     argparser.add_argument("--ignore_voted2020_year", action='store_true', default=False, help="Whether to omit 'in 2020' from the voted2020 sentence (candidate/no-vote is still stated)")
     argparser.add_argument("--ignore_age", action='store_true', default=False, help="Whether to omit the age sentence from the persona text")
     argparser.add_argument("--ignore_extend_with_ai", action='store_true', default=False, help="Whether to skip extending personas with AI-generated occupation/hobbies")
+    argparser.add_argument("--ignore_bio", action='store_true', default=False, help="Whether to skip generating a biography for the persona entirely")
     # Here, the parameters control what is added to the public bio of the agent. The persona generation always uses all info.
     argparser.add_argument("--ignore_bio_love_hate", action='store_true', default=False, help="Whether to ignore love/hate lists in bio")
     argparser.add_argument("--ignore_bio_party_identity", action='store_true', default=False, help="Whether to ignore party identity info in bio")
@@ -834,6 +835,7 @@ def generate_personas_cli(args: argparse.Namespace) -> dict:
         f"{'noVoted2020Year_' if args.ignore_voted2020_year else ''}"
         f"{'noAge_' if args.ignore_age else ''}"
         f"{'noExtendWithAi_' if args.ignore_extend_with_ai else ''}"
+        f"{'noBio_' if args.ignore_bio else ''}"
         f"{'noBioLoveHate_' if args.ignore_bio_love_hate else ''}"
         f"{'noBioPartyId_' if args.ignore_bio_party_identity else ''}"
         f"{'noBioVoted2020_' if args.ignore_bio_voted2020 else ''}"
@@ -854,7 +856,10 @@ def generate_personas_cli(args: argparse.Namespace) -> dict:
         i+=1
         if not args.ignore_extend_with_ai:
             extend_with_ai(persona, client)
-        add_biography(persona, client)
+        if not args.ignore_bio:
+            add_biography(persona, client)
+        else:
+            persona['biography'] = None
         print(persona['persona'], persona['biography'])
         print()
 
@@ -866,6 +871,7 @@ def generate_personas_cli(args: argparse.Namespace) -> dict:
         f"{'noVoted2020Year_' if args.ignore_voted2020_year else ''}"
         f"{'noAge_' if args.ignore_age else ''}"
         f"{'noExtendWithAi_' if args.ignore_extend_with_ai else ''}"
+        f"{'noBio_' if args.ignore_bio else ''}"
         f"{'noBioLoveHate_' if args.ignore_bio_love_hate else ''}"
         f"{'noBioPartyId_' if args.ignore_bio_party_identity else ''}"
         f"{'noBioVoted2020_' if args.ignore_bio_voted2020 else ''}"

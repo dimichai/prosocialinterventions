@@ -212,7 +212,7 @@ def ask_feeling_thermometer(client: OpenAI, persona: dict, targets: list[tuple[s
 
 def interview_personas(
     personas_file: str,
-    output_file: str,
+    output_file: str | None,
     questions: list[tuple[str, str]],
     thermometer_targets: list[tuple[str, str]],
     model: str,
@@ -269,15 +269,130 @@ def interview_personas(
 
         results.append(row)
 
-        if (i + 1) % 20 == 0:
+        if output_file and (i + 1) % 20 == 0:
             pd.DataFrame(results).to_csv(output_file, index=False)
 
     df = pd.DataFrame(results)
-    df.to_csv(output_file, index=False)
-    print(f"Results saved to {output_file}")
+    if output_file:
+        df.to_csv(output_file, index=False)
+        print(f"Results saved to {output_file}")
 
     client.close()
     return df
+
+
+def _pct_yes_no_dontknow(answers: pd.Series) -> tuple[float, float, int]:
+    """From a raw `{key}_answer` column (True/False/"dont_know"/None), return
+    (pct_yes, pct_dont_know, n_answered) for one run."""
+    is_dont_know = answers.eq("dont_know")
+    n_total = int(answers.notna().sum())
+    yes_no = answers[~is_dont_know].map({True: 1.0, False: 0.0})
+    n_answered = int(yes_no.notna().sum())
+    pct_yes = yes_no.mean() if n_answered else float("nan")
+    pct_dont_know = (is_dont_know.sum() / n_total) if n_total else float("nan")
+    return pct_yes, pct_dont_know, n_answered
+
+
+def _pct_recognized_and_rating(recognized: pd.Series, rating: pd.Series) -> tuple[float, float, int]:
+    """From raw `{role}_therm_recognized`/`{role}_therm_rating` columns, return
+    (pct_recognized, mean_rating_among_recognized, n_recognized) for one run."""
+    rec_numeric = recognized.map({True: 1.0, False: 0.0})
+    n_total = int(rec_numeric.notna().sum())
+    pct_recognized = rec_numeric.mean() if n_total else float("nan")
+    recognized_ratings = pd.to_numeric(rating[recognized == True], errors="coerce")
+    mean_rating = recognized_ratings.mean() if recognized_ratings.notna().any() else float("nan")
+    return pct_recognized, mean_rating, n_total
+
+
+def aggregate_interview_runs(
+    dfs: list[pd.DataFrame],
+    questions: list[tuple[str, str]],
+    thermometer_targets: list[tuple[str, str]],
+) -> pd.DataFrame:
+    """Aggregate multiple interview runs (one per seed) into per-party summary
+    statistics, averaged across runs (mean ± std).
+
+    Each run samples a different set of personas, so there's no persona-to-persona
+    correspondence across runs. Instead this computes a per-party summary stat
+    (yes-rate per question, mean thermometer rating) within each run, then averages
+    those summary stats across runs — mirroring the aggregation convention used in
+    persona_interviews_analysis_obfuscation.py (dont_know excluded from the yes/no
+    rate, grouped by `party`). Free-text explanations aren't averaged and are
+    dropped from this output.
+    """
+    active_questions = [(key, q) for key, q in questions if q.strip()]
+    rows = []
+
+    for key, label in active_questions:
+        col = f"{key}_answer"
+        per_party_runs: dict[str, list[dict]] = {}
+        for df in dfs:
+            if col not in df.columns:
+                continue
+            for party, group in df.groupby("party"):
+                pct_yes, pct_dont_know, n = _pct_yes_no_dontknow(group[col])
+                per_party_runs.setdefault(party, []).append(
+                    {"pct_yes": pct_yes, "pct_dont_know": pct_dont_know, "n": n}
+                )
+
+        for party, run_stats in per_party_runs.items():
+            pct_yes = pd.Series([r["pct_yes"] for r in run_stats])
+            pct_dk = pd.Series([r["pct_dont_know"] for r in run_stats])
+            ns = pd.Series([r["n"] for r in run_stats])
+            rows.append({
+                "metric": "question",
+                "key": key,
+                "label": label,
+                "party": party,
+                "n_runs": len(run_stats),
+                "avg_n": ns.mean(),
+                "pct_yes_mean": pct_yes.mean(),
+                "pct_yes_std": pct_yes.std(),
+                "pct_dont_know_mean": pct_dk.mean(),
+                "pct_dont_know_std": pct_dk.std(),
+                "pct_recognized_mean": float("nan"),
+                "pct_recognized_std": float("nan"),
+                "rating_mean": float("nan"),
+                "rating_std": float("nan"),
+            })
+
+    for role, label in thermometer_targets:
+        recognized_col = f"{role}_therm_recognized"
+        rating_col = f"{role}_therm_rating"
+        per_party_runs: dict[str, list[dict]] = {}
+        for df in dfs:
+            if recognized_col not in df.columns:
+                continue
+            for party, group in df.groupby("party"):
+                pct_recognized, mean_rating, n = _pct_recognized_and_rating(
+                    group[recognized_col], group[rating_col]
+                )
+                per_party_runs.setdefault(party, []).append(
+                    {"pct_recognized": pct_recognized, "rating": mean_rating, "n": n}
+                )
+
+        for party, run_stats in per_party_runs.items():
+            pct_rec = pd.Series([r["pct_recognized"] for r in run_stats])
+            rating = pd.Series([r["rating"] for r in run_stats])
+            ns = pd.Series([r["n"] for r in run_stats])
+            rows.append({
+                "metric": "thermometer",
+                "key": role,
+                "label": label,
+                "party": party,
+                "n_runs": len(run_stats),
+                "avg_n": ns.mean(),
+                "pct_yes_mean": float("nan"),
+                "pct_yes_std": float("nan"),
+                "pct_dont_know_mean": float("nan"),
+                "pct_dont_know_std": float("nan"),
+                "pct_recognized_mean": pct_rec.mean(),
+                "pct_recognized_std": pct_rec.std(),
+                "rating_mean": rating.mean(),
+                "rating_std": rating.std(),
+            })
+
+    return pd.DataFrame(rows)
 
 
 def parse_args() -> argparse.Namespace:
@@ -294,8 +409,11 @@ def parse_args() -> argparse.Namespace:
                          help="OpenRouter model id used to answer as each persona.")
     parser.add_argument("--persona_sample", type=int, default=None,
                          help="Number of personas to randomly sample; omit to interview all personas.")
-    parser.add_argument("--seed", type=int, default=42,
-                         help="Random seed used when --persona_sample is set.")
+    parser.add_argument("--seed", type=int, nargs="+", default=[42],
+                         help="One or more random seeds used when --persona_sample is set. "
+                              "With multiple seeds, the interview is run once per seed and "
+                              "the per-party results are averaged (mean ± std) across runs "
+                              "instead of writing raw per-persona rows.")
     return parser.parse_args()
 
 
@@ -303,6 +421,7 @@ def main() -> None:
     args = parse_args()
     personas_setting = args.personas_setting
     sample_suffix = f"_sample{args.persona_sample}" if args.persona_sample else ""
+    seed_suffix = f"_avg{len(args.seed)}seeds" if len(args.seed) > 1 else ""
 
     trump_label, biden_label = get_political_figure_labels(personas_setting)
     democrats_label, republicans_label = get_party_labels(personas_setting)
@@ -310,17 +429,38 @@ def main() -> None:
     thermometer_targets = build_thermometer_targets(trump_label, biden_label, democrats_label, republicans_label)
 
     personas_file = os.path.join(os.path.dirname(__file__), f"../../src/{personas_setting}.json")
-    output_file   = os.path.join(os.path.dirname(__file__), "results", f"persona_interview_results_{personas_setting}{sample_suffix}.csv")
+    output_file   = os.path.join(os.path.dirname(__file__), "results", f"persona_interview_results_{personas_setting}{sample_suffix}{seed_suffix}.csv")
 
-    df = interview_personas(
-        personas_file=personas_file,
-        output_file=output_file,
-        questions=questions,
-        thermometer_targets=thermometer_targets,
-        model=args.model,
-        persona_sample=args.persona_sample,
-        seed=args.seed,
-    )
+    if len(args.seed) == 1:
+        df = interview_personas(
+            personas_file=personas_file,
+            output_file=output_file,
+            questions=questions,
+            thermometer_targets=thermometer_targets,
+            model=args.model,
+            persona_sample=args.persona_sample,
+            seed=args.seed[0],
+        )
+    else:
+        if args.persona_sample is None:
+            print("Note: --persona_sample not set, so each seed re-interviews the full "
+                  "population; averaging captures run-to-run LLM variability rather than "
+                  "sampling variance.")
+        dfs = []
+        for i, seed in enumerate(args.seed):
+            print(f"=== Seed {i + 1}/{len(args.seed)} (seed={seed}) ===")
+            dfs.append(interview_personas(
+                personas_file=personas_file,
+                output_file=None,
+                questions=questions,
+                thermometer_targets=thermometer_targets,
+                model=args.model,
+                persona_sample=args.persona_sample,
+                seed=seed,
+            ))
+        df = aggregate_interview_runs(dfs, questions, thermometer_targets)
+        df.to_csv(output_file, index=False)
+        print(f"Averaged results across {len(args.seed)} seeds saved to {output_file}")
 
 
 if __name__ == "__main__":

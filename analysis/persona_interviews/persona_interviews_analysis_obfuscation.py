@@ -88,9 +88,11 @@ PARTY_THERM_COLS = {
 
 RESULTS_DIR = os.path.join(os.path.dirname(__file__), "results")
 COMPARISON_FILES = {
-    "No Obfuscation": os.path.join(RESULTS_DIR, "persona_interview_results_20260720_personas_with_bio_2000_noExtendWithAi__sample10.csv"),
-    "Neutral":         os.path.join(RESULTS_DIR, "persona_interview_results_20260720_personas_with_bio_2000_noExtendWithAi_obfNeutral__sample10.csv"),
-    "Nonce":           os.path.join(RESULTS_DIR, "persona_interview_results_20260720_personas_with_bio_2000_noExtendWithAi_obfNonce__sample10.csv"),
+    "No Obfuscation": os.path.join(RESULTS_DIR, "persona_interview_results_20260720_personas_with_bio_2000_noExtendWithAi_.csv"),
+    "Neutral":         os.path.join(RESULTS_DIR, "persona_interview_results_20260720_personas_with_bio_2000_noExtendWithAi_obfNeutral_.csv"),
+    "Nonce":           os.path.join(RESULTS_DIR, "persona_interview_results_20260720_personas_with_bio_2000_noExtendWithAi_obfNonce_.csv"),
+    "RandomNonce":     os.path.join(RESULTS_DIR, "persona_interview_results_20260727_personas_with_bio_2000_noExtendWithAi_obfRandomNonce_.csv"),
+    "RandomReal":     os.path.join(RESULTS_DIR, "persona_interview_results_20260727_personas_with_bio_2000_noExtendWithAi_obfRandomReal_.csv"),
 }
 COMPARISON_OUTPUT_BARS = os.path.join(os.path.dirname(__file__), "figs", "interview_results_obfuscation.pdf")
 COMPARISON_OUTPUT_TRAITS = os.path.join(os.path.dirname(__file__), "figs", "interview_results_obfuscation_traits.pdf")
@@ -347,12 +349,16 @@ def main() -> None:
 
     follow_present = cols_with_titles(follow_cols)
     trait_present  = cols_with_titles(trait_cols)
-    answer_cols    = [c for c, _ in follow_present + trait_present]
+    # For printing, use every question column (not just ones present in every
+    # comparison file) so conditions with extra questions still get reported.
+    all_answer_cols = follow_cols + trait_cols
 
     all_parties = sorted(set().union(*[set(df["party"].dropna().unique()) for df in dfs.values()]))
     labels      = list(dfs.keys())
 
-    condition_colors = {l: c for l, c in zip(labels, ["#03357D", "#888888", "#D50403", "#58508D", "#FFA600"])}
+    # Colorblind-validated categorical palette (fixed order, not cycled):
+    # blue, orange, aqua, yellow, magenta.
+    condition_colors = {l: c for l, c in zip(labels, ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"])}
 
     # Obfuscation conditions are distinct schemes, not a progressive/additive series
     # (unlike the ablation comparison), so a grouped bar chart per condition
@@ -367,7 +373,9 @@ def main() -> None:
         print(f"\n{'='*60}")
         print(f"  {label}")
         print(f"{'='*60}")
-        for col in answer_cols:
+        for col in all_answer_cols:
+            if col not in df.columns:
+                continue
             key = col.replace("_answer", "")
             q_text = question_labels.get(key, question_texts.get(key, col)).replace("\n", " ")
             print(f"\n  {q_text}")

@@ -66,7 +66,7 @@ def obf(value, mapping):
 
 
 # This code fetches lines from the ANES, and returns as readable dict
-def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=False, ignore_voted2020=False, obfuscation='none'):
+def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=False, ignore_voted2020=False, obfuscation='none', seed=42):
 
     obfuscation_map = load_obfuscation_map(obfuscation)
 
@@ -493,7 +493,7 @@ def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=Fal
     
     ## Function that generates N random people, with WEIGHTING based on the ANES weighting    
     # Note that replacement is key here!
-    random_rows = df1.sample(n=number_rows, replace=True) if number_rows is not None else df1
+    random_rows = df1.sample(n=number_rows, replace=True, random_state=seed) if number_rows is not None else df1
     
     random_dicts = random_rows.to_dict(orient="records")
 
@@ -796,7 +796,10 @@ if __name__ == "__main__":
     argparser.add_argument("--ignore_bio_party_identity", action='store_true', default=False, help="Whether to ignore party identity info in bio")
     argparser.add_argument("--ignore_bio_voted2020", action='store_true', default=False, help="Whether to ignore voted2020 info in bio")
     argparser.add_argument("--obfuscation", choices=['none', 'neutral', 'nonce', 'randomreal', 'randomnonce'], default='none', help="Obfuscate identifying terms in the persona text: none (as-is), neutral (generic labels), nonce (meaningless tokens), randomreal (random real terms), randomnonce (random meaningless tokens)")
+    argparser.add_argument("--seed", type=int, default=42, help="Random seed for persona sampling and AI extension choices")
     args = argparser.parse_args()
+
+    random.seed(args.seed)
 
     #Example usage
     # print(return_persona_string())
@@ -805,7 +808,8 @@ if __name__ == "__main__":
                             ignore_love_hate=args.ignore_love_hate,
                             ignore_party_identity=args.ignore_party_identity,
                             ignore_voted2020=args.ignore_voted2020,
-                            obfuscation=args.obfuscation)
+                            obfuscation=args.obfuscation,
+                            seed=args.seed)
 
     personas_file_name = (
         f"{datetime.now().strftime('%Y%m%d')}_personas_{args.num_personas}_"

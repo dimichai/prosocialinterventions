@@ -99,15 +99,9 @@ class BooleanAnswer(BaseModel):
     explanation: str
 
 
-class FeelingThermometerAnswer(BaseModel):
-    biden_recognized: bool
-    biden_rating: int | None   # 0-100, None if not recognized
-    trump_recognized: bool
-    trump_rating: int | None
-    democrats_recognized: bool
-    democrats_rating: int | None
-    republicans_recognized: bool
-    republicans_rating: int | None
+class ThermometerAnswer(BaseModel):
+    recognized: bool
+    rating: int | None   # 0-100, None if not recognized
 
 
 def _system_message(persona: dict) -> str:
@@ -150,14 +144,14 @@ def ask_question(client: OpenAI, persona: dict, question: str, model: str) -> tu
     return None, "ERROR: response truncated (length limit reached) after retry"
 
 
-def ask_feeling_thermometer(client: OpenAI, persona: dict, targets: list[tuple[str, str]], model: str) -> dict:
-    """Send the feeling-thermometer battery (Biden, Trump) in a single call."""
+def ask_feeling_thermometer_single(client: OpenAI, persona: dict, label: str, model: str) -> tuple[bool | None, int | None]:
+    """Rate a single thermometer target in its own call, with no other target in context."""
 
     prompt = (
         f"{THERMOMETER_INTRO}\n\n"
-        + "\n".join(f"How would you rate: {label}" for _, label in targets)
-        + "\n\nFor each person, indicate whether you recognize them, and if so, "
-          "give a whole-number rating between 0 and 100."
+        f"How would you rate: {label}\n\n"
+        "Indicate whether you recognize this person, and if so, give a "
+        "whole-number rating between 0 and 100."
     )
 
     for attempt in range(2):
@@ -168,33 +162,27 @@ def ask_feeling_thermometer(client: OpenAI, persona: dict, targets: list[tuple[s
                     {"role": "system", "content": _system_message(persona)},
                     {"role": "user", "content": prompt},
                 ],
-                response_format=FeelingThermometerAnswer,
+                response_format=ThermometerAnswer,
                 max_tokens=16384,
             )
             parsed = response.choices[0].message.parsed
-            return {
-                "biden_therm_recognized": parsed.biden_recognized,
-                "biden_therm_rating":     parsed.biden_rating,
-                "trump_therm_recognized": parsed.trump_recognized,
-                "trump_therm_rating":     parsed.trump_rating,
-                "democrats_therm_recognized":   parsed.democrats_recognized,
-                "democrats_therm_rating":       parsed.democrats_rating,
-                "republicans_therm_recognized": parsed.republicans_recognized,
-                "republicans_therm_rating":     parsed.republicans_rating,
-            }
+            return parsed.recognized, parsed.rating
         except LengthFinishReasonError:
-            print(f"    [warn] truncated thermometer response on attempt {attempt + 1}")
+            print(f"    [warn] truncated thermometer response on attempt {attempt + 1} for {label!r}")
 
-    return {
-        "biden_therm_recognized": None,
-        "biden_therm_rating":     None,
-        "trump_therm_recognized": None,
-        "trump_therm_rating":     None,
-        "democrats_therm_recognized":   None,
-        "democrats_therm_rating":       None,
-        "republicans_therm_recognized": None,
-        "republicans_therm_rating":     None,
-    }
+    return None, None
+
+
+def ask_feeling_thermometer(client: OpenAI, persona: dict, targets: list[tuple[str, str]], model: str) -> dict:
+    """Rate each thermometer target with a separate call (avoids order/anchoring
+    effects from batching multiple targets into one comparative call)."""
+
+    row = {}
+    for role, label in targets:
+        recognized, rating = ask_feeling_thermometer_single(client, persona, label, model)
+        row[f"{role}_therm_recognized"] = recognized
+        row[f"{role}_therm_rating"]     = rating
+    return row
 
 
 def interview_personas(

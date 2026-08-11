@@ -74,7 +74,8 @@ def build_questions(
     trump_label: str, biden_label: str, democrats_label: str, republicans_label: str
 ) -> list[tuple[str, str]]:
     return [
-        ("q1", "Would you follow someone who is a member of the opposing political party?"),
+        ("q1_dem", f"Would you follow someone who is a member of {democrats_label}?"),
+        ("q1_rep", f"Would you follow someone who is a member of {republicans_label}?"),
         ("q2", f"Would you follow someone who loves {trump_label}?"),
         ("q3", f"Would you follow someone who hates {trump_label}?"),
         ("q4", f"Would you follow someone who loves {biden_label}?"),

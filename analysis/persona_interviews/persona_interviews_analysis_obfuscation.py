@@ -1,3 +1,4 @@
+import math
 import os
 
 import matplotlib.pyplot as plt
@@ -63,7 +64,8 @@ TRAIT_QUESTIONS = [
 ]
 
 QUESTIONS = [
-    ("q1", "On a social network, would you follow someone who is a member of the opposing political party?"),
+    ("q1_dem", "On a social network, would you follow someone who is a member of the Democrats?"),
+    ("q1_rep", "On a social network, would you follow someone who is a member of the Republicans?"),
     ("q2", "On a social network, would you follow someone who loves Donald Trump?"),
     ("q3", "On a social network, Would you follow someone who hates Donald Trump?"),
     ("q4", "On a social network, would you follow someone who loves Joe Biden?"),
@@ -79,20 +81,20 @@ THERMOMETER_TARGETS = [
     ("republicans", "Republicans"),
 ]
 
-# Own-party / opposing-party feeling-thermometer columns used to compute
-# affective polarization for each partisan group.
-PARTY_THERM_COLS = {
-    "Democrat":   ("democrats_therm_rating", "republicans_therm_rating"),
-    "Republican": ("republicans_therm_rating", "democrats_therm_rating"),
+# Own-party / opposing-party thermometer roles (see THERMOMETER_TARGETS keys)
+# used to compute affective polarization for each partisan group.
+PARTY_THERM_ROLES = {
+    "Democrat":   ("democrats", "republicans"),
+    "Republican": ("republicans", "democrats"),
 }
 
 RESULTS_DIR = os.path.join(os.path.dirname(__file__), "results")
 COMPARISON_FILES = {
-    "No Obfuscation": os.path.join(RESULTS_DIR, "persona_interview_results_20260720_personas_with_bio_2000_noExtendWithAi_.csv"),
-    "Neutral":         os.path.join(RESULTS_DIR, "persona_interview_results_20260720_personas_with_bio_2000_noExtendWithAi_obfNeutral_.csv"),
-    "Nonce":           os.path.join(RESULTS_DIR, "persona_interview_results_20260720_personas_with_bio_2000_noExtendWithAi_obfNonce_.csv"),
-    "RandomNonce":     os.path.join(RESULTS_DIR, "persona_interview_results_20260727_personas_with_bio_2000_noExtendWithAi_obfRandomNonce_.csv"),
-    "RandomReal":     os.path.join(RESULTS_DIR, "persona_interview_results_20260727_personas_with_bio_2000_noExtendWithAi_obfRandomReal_.csv"),
+    "No Obfuscation": os.path.join(RESULTS_DIR, "persona_interview_results_20260810_personas_with_bio_500_noVoted2020Year_noAge_noExtendWithAi_noBio__sample50_avg3seeds.csv"),
+    "Neutral":         os.path.join(RESULTS_DIR, "persona_interview_results_20260810_personas_with_bio_500_noVoted2020Year_noAge_noExtendWithAi_noBio_obfNeutral__sample50_avg3seeds.csv"),
+    "Nonce":           os.path.join(RESULTS_DIR, "persona_interview_results_20260810_personas_with_bio_500_noVoted2020Year_noAge_noExtendWithAi_noBio_obfNonce__sample50_avg3seeds.csv"),
+    "RandomNonce":     os.path.join(RESULTS_DIR, "persona_interview_results_20260810_personas_with_bio_500_noVoted2020Year_noAge_noExtendWithAi_noBio_obfRandomNonce__sample50_avg3seeds.csv"),
+    "RandomReal":     os.path.join(RESULTS_DIR, "persona_interview_results_20260810_personas_with_bio_500_noVoted2020Year_noAge_noExtendWithAi_noBio_obfRandomReal__sample50_avg3seeds.csv"),
 }
 COMPARISON_OUTPUT_BARS = os.path.join(os.path.dirname(__file__), "figs", "interview_results_obfuscation.pdf")
 COMPARISON_OUTPUT_TRAITS = os.path.join(os.path.dirname(__file__), "figs", "interview_results_obfuscation_traits.pdf")
@@ -102,48 +104,50 @@ COMPARISON_OUTPUT_POLARIZATION = os.path.join(os.path.dirname(__file__), "figs",
 
 
 def load_and_prepare(path: str) -> pd.DataFrame:
-    df = pd.read_csv(path)
-    for k, _ in QUESTIONS:
-        col = f"{k}_answer"
-        if col in df.columns:
-            normalized = df[col].astype(str).str.strip().str.lower()
-            # Trait questions allow a "dont_know" answer (see persona_interviews_obfuscation.py).
-            # Map it (and any error rows) to NaN rather than 0, so it doesn't get
-            # silently counted as "No" in the yes/no fraction below.
-            df[f"{col}_dont_know"] = normalized.eq("dont_know")
-            df[col] = normalized.map({"true": 1.0, "false": 0.0})
-
-    # Affective polarization: rating given to the respondent's own party minus
-    # the rating given to the opposing party (only defined for partisans).
-    df["affective_polarization"] = float("nan")
-    for party, (own_col, opp_col) in PARTY_THERM_COLS.items():
-        if own_col in df.columns and opp_col in df.columns:
-            mask = df["party"] == party
-            df.loc[mask, "affective_polarization"] = df.loc[mask, own_col] - df.loc[mask, opp_col]
-
-    return df
+    """Load a pre-aggregated (multi-seed-averaged) results CSV, as produced by
+    `aggregate_interview_runs` in persona_interviews_obfuscation.py: one row per
+    (metric, key, party) with `pct_yes_mean`/`pct_yes_std` (metric == "question")
+    or `rating_mean`/`rating_std` (metric == "thermometer"), averaged across seeds.
+    """
+    return pd.read_csv(path)
 
 
-def plot_answer_comparison(
+def _lookup(df: pd.DataFrame, metric: str, key: str, party: str, value_col: str, std_col: str) -> tuple[float, float]:
+    """Return (value, 95%-CI half-width) for one (metric, key, party) row, where
+    the CI is computed from the cross-seed std already stored in the aggregated CSV
+    (`1.96 * std / sqrt(n_runs)`) rather than a per-respondent binomial SE, since
+    raw per-respondent answers aren't available in this aggregated format."""
+    row = df[(df["metric"] == metric) & (df["key"] == key) & (df["party"] == party)]
+    if row.empty:
+        return float("nan"), float("nan")
+    row = row.iloc[0]
+    value, std, n_runs = row[value_col], row[std_col], row["n_runs"]
+    if pd.isna(value) or n_runs <= 0:
+        return float("nan"), float("nan")
+    err = 1.96 * std / math.sqrt(n_runs) if pd.notna(std) else float("nan")
+    return float(value), float(err)
+
+
+def plot_metric_comparison(
     dfs: dict[str, pd.DataFrame],
-    cols: list[tuple[str, str]],
+    keys: list[tuple[str, str]],
     all_parties: list[str],
     condition_colors: dict[str, str],
     output_path: str,
+    metric: str,
+    value_col: str,
+    std_col: str,
     ncols: int | None = None,
     ylabel: str = "Fraction answering Yes",
+    ylim: tuple[float, float] = (0, 1),
 ) -> None:
-    """Grouped bar chart of fraction-answering-Yes per party, one panel per question.
+    """Grouped bar chart of a per-party summary statistic, one panel per question/target.
 
     Panels wrap onto multiple rows (ncols per row) so this scales from a
     handful of questions up to a full trait battery without one absurdly wide row.
-
-    `col` values may contain NaN (e.g. trait "dont_know" answers, recoded to NaN
-    in load_and_prepare) — those rows are excluded from both the fraction and its
-    denominator `n`, rather than being counted as "No".
     """
-    n_questions = len(cols)
-    if n_questions == 0:
+    n_panels = len(keys)
+    if n_panels == 0:
         print(f"No columns to plot for {output_path} — skipping.")
         return
 
@@ -151,8 +155,8 @@ def plot_answer_comparison(
     n_datasets = len(labels)
     n_parties  = len(all_parties)
 
-    ncols = ncols or n_questions
-    nrows = -(-n_questions // ncols)  # ceil division
+    ncols = ncols or n_panels
+    nrows = -(-n_panels // ncols)  # ceil division
 
     group_width = 0.8
     bar_width   = group_width / n_datasets
@@ -161,19 +165,13 @@ def plot_answer_comparison(
     fig, axes = plt.subplots(nrows, ncols, figsize=(4 * ncols, 4.5 * nrows), sharey=True, squeeze=False)
     flat_axes = list(axes.flat)
 
-    for ax, (col, title) in zip(flat_axes, cols):
+    for ax, (key, title) in zip(flat_axes, keys):
         for d_idx, label in enumerate(labels):
             vals, errs = [], []
             for party in all_parties:
-                subset = dfs[label][dfs[label]["party"] == party][col]
-                n = int(subset.notna().sum())
-                if party in dfs[label]["party"].values and n > 0:
-                    p = subset.mean()
-                    vals.append(p)
-                    errs.append(1.96 * (p * (1 - p) / n) ** 0.5)
-                else:
-                    vals.append(float("nan"))
-                    errs.append(float("nan"))
+                v, e = _lookup(dfs[label], metric, key, party, value_col, std_col)
+                vals.append(v)
+                errs.append(e)
             color = condition_colors.get(label, "#888888")
             positions = [c - group_width / 2 + bar_width * (d_idx + 0.5) for c in group_centers]
             ax.bar(positions, vals, width=bar_width * 0.9, yerr=errs, color=color,
@@ -182,12 +180,12 @@ def plot_answer_comparison(
         ax.set_title(title, fontweight='medium', pad=8, fontsize=10)
         ax.set_xticks(group_centers)
         ax.set_xticklabels(all_parties, rotation=15)
-        ax.set_ylim(0, 1)
+        ax.set_ylim(*ylim)
         ax.yaxis.set_major_locator(plt.MaxNLocator(5))
         ax.yaxis.grid(True, linestyle='-', alpha=0.15, color='#333333')
         ax.set_axisbelow(True)
 
-    for ax in flat_axes[n_questions:]:
+    for ax in flat_axes[n_panels:]:
         ax.axis("off")
     for row in range(nrows):
         axes[row, 0].set_ylabel(ylabel)
@@ -202,14 +200,14 @@ def plot_answer_comparison(
 
 
 def plot_thermometer_comparison(dfs: dict[str, pd.DataFrame], all_parties: list[str], condition_colors: dict[str, str]) -> None:
-    labels     = list(dfs.keys())
-    therm_cols = [(f"{role}_therm_rating", label) for role, label in THERMOMETER_TARGETS
-                  if all(f"{role}_therm_rating" in df.columns for df in dfs.values())]
-    if not therm_cols:
-        print("No feeling-thermometer columns found in the comparison CSVs — skipping thermometer comparison plot.")
+    therm_keys = [(role, label) for role, label in THERMOMETER_TARGETS
+                  if all(((df["metric"] == "thermometer") & (df["key"] == role)).any() for df in dfs.values())]
+    if not therm_keys:
+        print("No feeling-thermometer rows found in the comparison CSVs — skipping thermometer comparison plot.")
         return
 
-    n_questions = len(therm_cols)
+    labels     = list(dfs.keys())
+    n_questions = len(therm_keys)
     n_datasets  = len(labels)
     n_parties   = len(all_parties)
 
@@ -221,17 +219,13 @@ def plot_thermometer_comparison(dfs: dict[str, pd.DataFrame], all_parties: list[
     if n_questions == 1:
         axes = [axes]
 
-    for ax, (col, person_label) in zip(axes, therm_cols):
+    for ax, (role, person_label) in zip(axes, therm_keys):
         for d_idx, label in enumerate(labels):
             vals, errs = [], []
             for party in all_parties:
-                subset = dfs[label].loc[dfs[label]["party"] == party, col].dropna()
-                if len(subset) > 0:
-                    vals.append(subset.mean())
-                    errs.append(1.96 * subset.std(ddof=1) / len(subset) ** 0.5)
-                else:
-                    vals.append(float("nan"))
-                    errs.append(float("nan"))
+                v, e = _lookup(dfs[label], "thermometer", role, party, "rating_mean", "rating_std")
+                vals.append(v)
+                errs.append(e)
             color = condition_colors.get(label, "#888888")
             positions = [c - group_width / 2 + bar_width * (d_idx + 0.5) for c in group_centers]
             ax.bar(positions, vals, width=bar_width * 0.9, yerr=errs, color=color,
@@ -259,22 +253,36 @@ def plot_thermometer_comparison(dfs: dict[str, pd.DataFrame], all_parties: list[
         print(f"\n{'='*60}")
         print(f"  {label}")
         print(f"{'='*60}")
-        for col, person_label in therm_cols:
+        for role, person_label in therm_keys:
             print(f"\n  Feeling thermometer: {person_label}")
             for party in all_parties:
-                subset = df.loc[df["party"] == party, col].dropna()
-                if len(subset) == 0:
+                row = df[(df["metric"] == "thermometer") & (df["key"] == role) & (df["party"] == party)]
+                if row.empty or pd.isna(row.iloc[0]["rating_mean"]):
                     continue
-                print(f"    {party:<30} {subset.mean():5.1f}  (n={len(subset)})")
+                r = row.iloc[0]
+                print(f"    {party:<30} {r['rating_mean']:5.1f}  (avg_n={r['avg_n']:.1f}, n_runs={int(r['n_runs'])})")
 
 
 def plot_affective_polarization_comparison(dfs: dict[str, pd.DataFrame], condition_colors: dict[str, str]) -> None:
     labels  = list(dfs.keys())
-    parties = [p for p in PARTY_THERM_COLS
+    parties = [p for p in PARTY_THERM_ROLES
                if any((df["party"] == p).any() for df in dfs.values())]
     if not parties:
         print("No partisan respondents with party feeling-thermometer ratings found — skipping affective polarization plot.")
         return
+
+    def polarization(df: pd.DataFrame, party: str) -> tuple[float, float]:
+        own_role, opp_role = PARTY_THERM_ROLES[party]
+        own_val, own_err = _lookup(df, "thermometer", own_role, party, "rating_mean", "rating_std")
+        opp_val, opp_err = _lookup(df, "thermometer", opp_role, party, "rating_mean", "rating_std")
+        if math.isnan(own_val) or math.isnan(opp_val):
+            return float("nan"), float("nan")
+        # Own/opposing ratings come from the same respondents, but per-run values
+        # aren't available in this aggregated format, so their errors are combined
+        # assuming independence (a reasonable approximation, not exact).
+        own_err = own_err if not math.isnan(own_err) else 0.0
+        opp_err = opp_err if not math.isnan(opp_err) else 0.0
+        return own_val - opp_val, math.hypot(own_err, opp_err)
 
     n_parties  = len(parties)
     n_datasets = len(labels)
@@ -288,13 +296,9 @@ def plot_affective_polarization_comparison(dfs: dict[str, pd.DataFrame], conditi
     for d_idx, label in enumerate(labels):
         vals, errs = [], []
         for party in parties:
-            subset = dfs[label].loc[dfs[label]["party"] == party, "affective_polarization"].dropna()
-            if len(subset) > 0:
-                vals.append(subset.mean())
-                errs.append(1.96 * subset.std(ddof=1) / len(subset) ** 0.5)
-            else:
-                vals.append(float("nan"))
-                errs.append(float("nan"))
+            v, e = polarization(dfs[label], party)
+            vals.append(v)
+            errs.append(e)
         color = condition_colors.get(label, "#888888")
         positions = [c - group_width / 2 + bar_width * (d_idx + 0.5) for c in group_centers]
         ax.bar(positions, vals, width=bar_width * 0.9, yerr=errs, color=color,
@@ -324,21 +328,22 @@ def plot_affective_polarization_comparison(dfs: dict[str, pd.DataFrame], conditi
         print(f"{'='*60}")
         print("\n  Affective polarization (own-party minus opposing-party rating)")
         for party in parties:
-            subset = df.loc[df["party"] == party, "affective_polarization"].dropna()
-            if len(subset) == 0:
+            v, _ = polarization(df, party)
+            if math.isnan(v):
                 continue
-            print(f"    {party:<30} {subset.mean():6.1f}  (n={len(subset)})")
+            print(f"    {party:<30} {v:6.1f}")
 
 
 def main() -> None:
     dfs = {label: load_and_prepare(path) for label, path in COMPARISON_FILES.items()}
 
-    follow_cols = ['q1_answer', 'q2_answer', 'q3_answer', 'q4_answer', 'q5_answer']
-    trait_cols  = ([f"dem_{key}_answer" for key, _ in TRAIT_QUESTIONS]
-                   + [f"rep_{key}_answer" for key, _ in TRAIT_QUESTIONS])
+    follow_keys = ['q1_dem', 'q1_rep', 'q2', 'q3', 'q4', 'q5']
+    trait_keys  = ([f"dem_{key}" for key, _ in TRAIT_QUESTIONS]
+                  + [f"rep_{key}" for key, _ in TRAIT_QUESTIONS])
 
     question_labels = {
-        'q1': "Would you follow\nan opposing-party member?",
+        'q1_dem': "Would you follow\na member of Democrats\n(obfuscated per condition)?",
+        'q1_rep': "Would you follow\na member of Republicans\n(obfuscated per condition)?",
         'q2': "Would you follow\nsomeone who loves Trump\n(obfuscated per condition)?",
         'q3': "Would you follow\nsomeone who hates Trump\n(obfuscated per condition)?",
         'q4': "Would you follow\nsomeone who loves Biden\n(obfuscated per condition)?",
@@ -349,26 +354,22 @@ def main() -> None:
         question_labels[f"rep_{key}"] = f"Republicans:\nare they {trait}?\n(obfuscated per condition)"
     question_texts = {k: t for k, t in QUESTIONS}
 
-    def cols_with_titles(cols: list[str]) -> list[tuple[str, str]]:
-        # Only plot columns present in every comparison file, so bars aren't
-        # silently missing for whichever condition lacks the data.
-        present = [c for c in cols if all(c in df.columns for df in dfs.values())]
-        return [
-            (c, question_labels.get(c.replace('_answer', ''), question_texts.get(c.replace('_answer', ''), c)))
-            for c in present
-        ]
+    def keys_with_titles(keys: list[str]) -> list[tuple[str, str]]:
+        # Only plot keys present (as a "question" row) in every comparison file,
+        # so bars aren't silently missing for whichever condition lacks the data.
+        present = [k for k in keys if all(((df["metric"] == "question") & (df["key"] == k)).any() for df in dfs.values())]
+        return [(k, question_labels.get(k, question_texts.get(k, k))) for k in present]
 
-    follow_present = cols_with_titles(follow_cols)
-    trait_present  = cols_with_titles(trait_cols)
-    # For printing, use every question column (not just ones present in every
+    follow_present = keys_with_titles(follow_keys)
+    trait_present  = keys_with_titles(trait_keys)
+    # For printing, use every question key (not just ones present in every
     # comparison file) so conditions with extra questions still get reported.
-    all_answer_cols = follow_cols + trait_cols
+    all_keys = follow_keys + trait_keys
 
-    dont_know_cols = [f"{c}_dont_know" for c in trait_cols]
     dont_know_present = [
-        (c, question_labels.get(c.replace('_answer_dont_know', ''),
-                                 question_texts.get(c.replace('_answer_dont_know', ''), c)) + "\n(don't know)")
-        for c in dont_know_cols if all(c in df.columns for df in dfs.values())
+        (k, question_labels.get(k, question_texts.get(k, k)) + "\n(don't know)")
+        for k in trait_keys
+        if all(((df["metric"] == "question") & (df["key"] == k)).any() for df in dfs.values())
     ]
 
     all_parties = sorted(set().union(*[set(df["party"].dropna().unique()) for df in dfs.values()]))
@@ -381,37 +382,38 @@ def main() -> None:
     # Obfuscation conditions are distinct schemes, not a progressive/additive series
     # (unlike the ablation comparison), so a grouped bar chart per condition
     # is the honest comparison — a connecting line would imply an ordering that isn't there.
-    plot_answer_comparison(dfs, follow_present, all_parties, condition_colors,
-                            COMPARISON_OUTPUT_BARS, ncols=len(follow_present) or 1)
+    plot_metric_comparison(dfs, follow_present, all_parties, condition_colors,
+                            COMPARISON_OUTPUT_BARS, "question", "pct_yes_mean", "pct_yes_std",
+                            ncols=len(follow_present) or 1)
     # Trait battery: one row for Democrats, one for Republicans, columns aligned by trait.
-    plot_answer_comparison(dfs, trait_present, all_parties, condition_colors,
-                            COMPARISON_OUTPUT_TRAITS, ncols=len(TRAIT_QUESTIONS))
+    plot_metric_comparison(dfs, trait_present, all_parties, condition_colors,
+                            COMPARISON_OUTPUT_TRAITS, "question", "pct_yes_mean", "pct_yes_std",
+                            ncols=len(TRAIT_QUESTIONS))
     # Trait "dont_know" rate: makes forced-choice artifacts (non-partisans with no
     # basis to judge an obfuscated group) visible instead of them defaulting to "No".
-    plot_answer_comparison(dfs, dont_know_present, all_parties, condition_colors,
-                            COMPARISON_OUTPUT_TRAITS_DONTKNOW, ncols=len(TRAIT_QUESTIONS),
-                            ylabel="Fraction answering \"don't know\"")
+    plot_metric_comparison(dfs, dont_know_present, all_parties, condition_colors,
+                            COMPARISON_OUTPUT_TRAITS_DONTKNOW, "question", "pct_dont_know_mean", "pct_dont_know_std",
+                            ncols=len(TRAIT_QUESTIONS), ylabel="Fraction answering \"don't know\"")
 
     for label, df in dfs.items():
         print(f"\n{'='*60}")
         print(f"  {label}")
         print(f"{'='*60}")
-        for col in all_answer_cols:
-            if col not in df.columns:
+        for key in all_keys:
+            rows = df[(df["metric"] == "question") & (df["key"] == key)]
+            if rows.empty:
                 continue
-            key = col.replace("_answer", "")
-            q_text = question_labels.get(key, question_texts.get(key, col)).replace("\n", " ")
+            q_text = question_labels.get(key, question_texts.get(key, key)).replace("\n", " ")
             print(f"\n  {q_text}")
-            dont_know_col = f"{col}_dont_know"
             for party in all_parties:
-                subset = df[df["party"] == party]
-                if len(subset) == 0:
+                row = rows[rows["party"] == party]
+                if row.empty:
                     continue
-                n_decided = int(subset[col].notna().sum())
-                pct_str = f"{subset[col].mean() * 100:5.1f}%" if n_decided > 0 else "  n/a"
-                line = f"    {party:<30} {pct_str}  (n={n_decided}"
-                if col in trait_cols and dont_know_col in df.columns:
-                    line += f", dont_know={subset[dont_know_col].mean() * 100:4.1f}%"
+                r = row.iloc[0]
+                pct_str = f"{r['pct_yes_mean'] * 100:5.1f}%" if pd.notna(r['pct_yes_mean']) else "  n/a"
+                line = f"    {party:<30} {pct_str}  (avg_n={r['avg_n']:.1f}"
+                if key in trait_keys and pd.notna(r['pct_dont_know_mean']):
+                    line += f", dont_know={r['pct_dont_know_mean'] * 100:4.1f}%"
                 print(line + ")")
 
     plot_thermometer_comparison(dfs, all_parties, condition_colors)

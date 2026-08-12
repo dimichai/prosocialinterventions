@@ -3,29 +3,45 @@ import os
 import sys
 import json
 import random
+import uuid
+from datetime import datetime
 from typing import Literal
 
 import dotenv
 import pandas as pd
+import wandb
 from openai import OpenAI, LengthFinishReasonError
 from pydantic import BaseModel
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+sys.path.insert(0, os.path.dirname(__file__))
+
+import interview_wandb  # noqa: E402
 
 # Obfuscated Trump/Biden labels are defined per obfuscation mode in this CSV
 # (see PersonaGeneration/anes_generate_personas.py, which generated the persona files).
 OBFUSCATION_CSV = os.path.join(os.path.dirname(__file__), "../../PersonaGeneration/persona_obfuscations.csv")
-FILENAME_SUFFIX_TO_COLUMN = {
-    "obfNeutral_":     "A_Neutral",
-    "obfNonce_":       "B_Nonce",
-    "obfRandomReal_":  "C_RandomReal",
-    "obfRandomNonce_": "D_RandomNonce",
+
+# Suffix anes_generate_personas.py embeds in persona filenames per obfuscation
+# condition -> (obfuscation id, persona_obfuscations.csv column).
+FILENAME_SUFFIX_INFO = {
+    "obfNeutral_":     ("neutral",     "A_Neutral"),
+    "obfNonce_":       ("nonce",       "B_Nonce"),
+    "obfRandomReal_":  ("randomreal",  "C_RandomReal"),
+    "obfRandomNonce_": ("randomnonce", "D_RandomNonce"),
 }
+
+
+def _infer_obfuscation(personas_setting: str) -> str:
+    """Best-effort fallback: infer the obfuscation condition ('none' if no suffix
+    matches) from the persona filename convention, for callers that don't already
+    know it explicitly (e.g. this script run standalone)."""
+    return next((o for suffix, (o, _) in FILENAME_SUFFIX_INFO.items() if suffix in personas_setting), "none")
 
 
 def _lookup_obfuscated_terms(personas_setting: str, terms: list[str]) -> list[str]:
     """Translate `terms` through the obfuscation mode encoded in personas_setting."""
-    column = next((c for suffix, c in FILENAME_SUFFIX_TO_COLUMN.items() if suffix in personas_setting), None)
+    column = next((c for suffix, (_, c) in FILENAME_SUFFIX_INFO.items() if suffix in personas_setting), None)
     if column is None:
         return terms
     df = pd.read_csv(OBFUSCATION_CSV).set_index("Term")
@@ -213,7 +229,6 @@ def ask_feeling_thermometer(client: OpenAI, persona: dict, targets: list[tuple[s
 
 def interview_personas(
     personas_file: str,
-    output_file: str | None,
     questions: list[tuple[str, str]],
     thermometer_targets: list[tuple[str, str]],
     model: str,
@@ -258,6 +273,13 @@ def interview_personas(
             "gender":        persona.get("gender", ""),
             "race":          persona.get("race", ""),
             "state":         persona.get("state", ""),
+            # Raw ANES-derived attributes (ground truth, not LLM-elicited) — kept
+            # here so run-level population stats can be computed from this same
+            # dataframe (see interview_wandb.persona_population_metrics).
+            "feelingDemocratic": persona.get("feelingDemocratic"),
+            "feelingRepublican": persona.get("feelingRepublican"),
+            "partisan":          persona.get("partisan"),
+            "voted2020_for":     persona.get("voted2020_for"),
         }
 
         for key, question in active_questions:
@@ -270,39 +292,9 @@ def interview_personas(
 
         results.append(row)
 
-        if output_file and (i + 1) % 20 == 0:
-            pd.DataFrame(results).to_csv(output_file, index=False)
-
     df = pd.DataFrame(results)
-    if output_file:
-        df.to_csv(output_file, index=False)
-        print(f"Results saved to {output_file}")
-
     client.close()
     return df
-
-
-def _pct_yes_no_dontknow(answers: pd.Series) -> tuple[float, float, int]:
-    """From a raw `{key}_answer` column (True/False/"dont_know"/None), return
-    (pct_yes, pct_dont_know, n_answered) for one run."""
-    is_dont_know = answers.eq("dont_know")
-    n_total = int(answers.notna().sum())
-    yes_no = answers[~is_dont_know].map({True: 1.0, False: 0.0})
-    n_answered = int(yes_no.notna().sum())
-    pct_yes = yes_no.mean() if n_answered else float("nan")
-    pct_dont_know = (is_dont_know.sum() / n_total) if n_total else float("nan")
-    return pct_yes, pct_dont_know, n_answered
-
-
-def _pct_recognized_and_rating(recognized: pd.Series, rating: pd.Series) -> tuple[float, float, int]:
-    """From raw `{role}_therm_recognized`/`{role}_therm_rating` columns, return
-    (pct_recognized, mean_rating_among_recognized, n_recognized) for one run."""
-    rec_numeric = recognized.map({True: 1.0, False: 0.0})
-    n_total = int(rec_numeric.notna().sum())
-    pct_recognized = rec_numeric.mean() if n_total else float("nan")
-    recognized_ratings = pd.to_numeric(rating[recognized == True], errors="coerce")
-    mean_rating = recognized_ratings.mean() if recognized_ratings.notna().any() else float("nan")
-    return pct_recognized, mean_rating, n_total
 
 
 def aggregate_interview_runs(
@@ -331,7 +323,7 @@ def aggregate_interview_runs(
             if col not in df.columns:
                 continue
             for party, group in df.groupby("party"):
-                pct_yes, pct_dont_know, n = _pct_yes_no_dontknow(group[col])
+                pct_yes, pct_dont_know, n = interview_wandb.pct_yes_no_dontknow(group[col])
                 per_party_runs.setdefault(party, []).append(
                     {"pct_yes": pct_yes, "pct_dont_know": pct_dont_know, "n": n}
                 )
@@ -365,7 +357,7 @@ def aggregate_interview_runs(
             if recognized_col not in df.columns:
                 continue
             for party, group in df.groupby("party"):
-                pct_recognized, mean_rating, n = _pct_recognized_and_rating(
+                pct_recognized, mean_rating, n = interview_wandb.pct_recognized_and_rating(
                     group[recognized_col], group[rating_col]
                 )
                 per_party_runs.setdefault(party, []).append(
@@ -412,9 +404,13 @@ def parse_args() -> argparse.Namespace:
                          help="Number of personas to randomly sample; omit to interview all personas.")
     parser.add_argument("--seed", type=int, nargs="+", default=[42],
                          help="One or more random seeds used when --persona_sample is set. "
-                              "With multiple seeds, the interview is run once per seed and "
-                              "the per-party results are averaged (mean ± std) across runs "
-                              "instead of writing raw per-persona rows.")
+                              "Each seed is run and logged to wandb as its own run "
+                              "(sharing a common wandb group); aggregation across seeds "
+                              "happens on the analysis side, reading back from wandb.")
+    parser.add_argument("--wandb_project", type=str, default=interview_wandb.WANDB_PROJECT,
+                         help="Wandb project to log interview runs to.")
+    parser.add_argument("--no_log", action="store_true", default=False,
+                         help="Skip wandb logging entirely (e.g. for local debugging runs).")
     return parser.parse_args()
 
 
@@ -423,13 +419,16 @@ def run_interview_for_setting(
     model: str,
     persona_sample: int | None,
     seeds: list[int],
-) -> str:
-    """Interview the personas in src/<personas_setting>.json (one or more seeds,
-    averaged if more than one) and write the results CSV to results/, same as the
-    CLI has always done. Returns the output CSV's absolute path."""
-
-    sample_suffix = f"_sample{persona_sample}" if persona_sample else ""
-    seed_suffix = f"_avg{len(seeds)}seeds" if len(seeds) > 1 else ""
+    wandb_group: str | None = None,
+    extra_config: dict | None = None,
+    log: bool = True,
+    wandb_project: str = interview_wandb.WANDB_PROJECT,
+) -> dict:
+    """Interview the personas in src/<personas_setting>.json, once per seed, logging
+    each seed's raw per-persona results to wandb as its own run (all sharing one
+    wandb group/batch id). Aggregation across seeds is done later, on the analysis
+    side, by reading the runs back from wandb. Returns identifying info about the
+    runs that were logged."""
 
     trump_label, biden_label = get_political_figure_labels(personas_setting)
     democrats_label, republicans_label = get_party_labels(personas_setting)
@@ -437,45 +436,74 @@ def run_interview_for_setting(
     thermometer_targets = build_thermometer_targets(trump_label, biden_label, democrats_label, republicans_label)
 
     personas_file = os.path.join(os.path.dirname(__file__), f"../../src/{personas_setting}.json")
-    output_file   = os.path.join(os.path.dirname(__file__), "results", f"persona_interview_results_{personas_setting}{sample_suffix}{seed_suffix}.csv")
 
-    if len(seeds) == 1:
+    obfuscation = (extra_config or {}).get("obfuscation") or _infer_obfuscation(personas_setting)
+    base_config = {
+        "obfuscation": obfuscation,
+        "personas_setting": personas_setting,
+        "model": model,
+        "persona_sample": persona_sample,
+        "num_seeds_in_batch": len(seeds),
+        "trump_label": trump_label,
+        "biden_label": biden_label,
+        "democrats_label": democrats_label,
+        "republicans_label": republicans_label,
+    }
+    if extra_config:
+        base_config.update(extra_config)
+
+    group = wandb_group or uuid.uuid4().hex[:8]
+    run_ids = []
+
+    if persona_sample is None and len(seeds) > 1:
+        print("Note: --persona_sample not set, so each seed re-interviews the full "
+              "population; comparing seeds captures run-to-run LLM variability rather "
+              "than sampling variance.")
+
+    for i, seed in enumerate(seeds):
+        print(f"=== Seed {i + 1}/{len(seeds)} (seed={seed}) ===")
+
+        if log:
+            run = wandb.init(
+                project=wandb_project,
+                group=group,
+                job_type="interview",
+                tags=[obfuscation],
+                name=f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{obfuscation}_seed{seed}",
+                config={**base_config, "interview_seed": seed},
+                reinit=True,
+            )
+
         df = interview_personas(
             personas_file=personas_file,
-            output_file=output_file,
             questions=questions,
             thermometer_targets=thermometer_targets,
             model=model,
             persona_sample=persona_sample,
-            seed=seeds[0],
+            seed=seed,
         )
-    else:
-        if persona_sample is None:
-            print("Note: --persona_sample not set, so each seed re-interviews the full "
-                  "population; averaging captures run-to-run LLM variability rather than "
-                  "sampling variance.")
-        dfs = []
-        for i, seed in enumerate(seeds):
-            print(f"=== Seed {i + 1}/{len(seeds)} (seed={seed}) ===")
-            dfs.append(interview_personas(
-                personas_file=personas_file,
-                output_file=None,
-                questions=questions,
-                thermometer_targets=thermometer_targets,
-                model=model,
-                persona_sample=persona_sample,
-                seed=seed,
-            ))
-        df = aggregate_interview_runs(dfs, questions, thermometer_targets)
-        df.to_csv(output_file, index=False)
-        print(f"Averaged results across {len(seeds)} seeds saved to {output_file}")
 
-    return output_file
+        if log:
+            interview_wandb.upload_results_artifact(df, name=f"interview-results-{obfuscation}-seed{seed}")
+            metrics = interview_wandb.persona_population_metrics(df)
+            metrics.update(interview_wandb.result_metrics(df, questions, thermometer_targets))
+            wandb.log(metrics)
+            run_ids.append(run.id)
+            wandb.finish()
+
+    if log:
+        print(f"Logged {len(seeds)} run(s) to wandb project '{wandb_project}' (group={group})")
+
+    return {"group": group, "obfuscation": obfuscation, "run_ids": run_ids}
 
 
 def main() -> None:
     args = parse_args()
-    run_interview_for_setting(args.personas_setting, args.model, args.persona_sample, args.seed)
+    result = run_interview_for_setting(
+        args.personas_setting, args.model, args.persona_sample, args.seed,
+        log=not args.no_log, wandb_project=args.wandb_project,
+    )
+    print(result)
 
 
 if __name__ == "__main__":

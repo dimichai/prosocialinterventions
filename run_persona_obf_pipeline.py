@@ -8,14 +8,17 @@ For each condition in --obfuscations, this:
   2. Copies the with-bio JSON into src/, since persona_interviews_obfuscation.py
      expects its input there (previously a manual step).
   3. Runs analysis/persona_interviews/persona_interviews_obfuscation.py against
-     that file (writes the results CSV into analysis/persona_interviews/results/,
-     same as running that script directly).
+     that file, logging one wandb run per (obfuscation, seed) to the interviews
+     wandb project. All runs from one invocation of this script share a wandb
+     group (batch id), so the analysis script can later pull "this whole
+     comparison" back from wandb in a single query.
 """
 
 import argparse
 import os
 import shutil
 import sys
+import uuid
 
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(REPO_ROOT, "PersonaGeneration"))
@@ -23,6 +26,7 @@ sys.path.insert(0, os.path.join(REPO_ROOT, "analysis", "persona_interviews"))
 
 import anes_generate_personas  # noqa: E402
 import persona_interviews_obfuscation  # noqa: E402
+import interview_wandb  # noqa: E402
 
 OBFUSCATION_CHOICES = ['none', 'neutral', 'nonce', 'randomreal', 'randomnonce']
 
@@ -54,8 +58,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", type=str, default="gpt-4o-mini", help="OpenRouter model id used to answer as each persona.")
     parser.add_argument("--persona_sample", type=int, default=None, help="Number of personas to randomly sample; omit to interview all personas.")
     parser.add_argument("--interview_seed", type=int, nargs="+", default=[42],
-                         help="One or more random seeds for the interview step. With multiple seeds, "
-                              "results are averaged (mean ± std) across runs.")
+                         help="One or more random seeds for the interview step. Each seed is logged "
+                              "to wandb as its own run; aggregation across seeds happens on the "
+                              "analysis side, reading back from wandb.")
+    parser.add_argument("--wandb_project", type=str, default=interview_wandb.WANDB_PROJECT,
+                         help="Wandb project to log interview runs to.")
+    parser.add_argument("--no_log", action='store_true', default=False,
+                         help="Skip wandb logging entirely (e.g. for local debugging runs).")
 
     return parser.parse_args()
 
@@ -71,6 +80,8 @@ def main() -> None:
 
     src_dir = os.path.join(REPO_ROOT, "src")
     summary = []
+    batch_id = uuid.uuid4().hex[:8]
+    print(f"Wandb batch id for this invocation: {batch_id}")
 
     for i, obfuscation in enumerate(args.obfuscations):
         print(f"\n=== [{i + 1}/{len(args.obfuscations)}] obfuscation={obfuscation} ===")
@@ -89,21 +100,29 @@ def main() -> None:
         shutil.copy2(with_bio_path, src_path)
         print(f"Copied to: {src_path}")
 
-        results_path = persona_interviews_obfuscation.run_interview_for_setting(
+        extra_config = {name: getattr(args, name) for name in gen_arg_names}
+        extra_config.update(obfuscation=obfuscation, gen_seed=args.gen_seed)
+
+        interview_result = persona_interviews_obfuscation.run_interview_for_setting(
             personas_setting=personas_setting,
             model=args.model,
             persona_sample=args.persona_sample,
             seeds=args.interview_seed,
+            wandb_group=batch_id,
+            extra_config=extra_config,
+            log=not args.no_log,
+            wandb_project=args.wandb_project,
         )
-        print(f"Interviewed -> {results_path}")
+        print(f"Interviewed -> {interview_result}")
 
-        summary.append((obfuscation, with_bio_path, results_path))
+        summary.append((obfuscation, with_bio_path, interview_result))
 
     print("\n=== Summary ===")
-    for obfuscation, generated_path, results_path in summary:
+    print(f"Wandb batch id: {batch_id} (project: {args.wandb_project})")
+    for obfuscation, generated_path, interview_result in summary:
         print(f"{obfuscation}:")
         print(f"  generated: {generated_path}")
-        print(f"  results:   {results_path}")
+        print(f"  wandb runs: {interview_result['run_ids']}")
 
 
 if __name__ == "__main__":

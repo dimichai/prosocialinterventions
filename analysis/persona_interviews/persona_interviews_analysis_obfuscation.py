@@ -1,8 +1,16 @@
+import argparse
 import math
 import os
+import sys
+from collections import defaultdict
 
 import matplotlib.pyplot as plt
 import pandas as pd
+
+sys.path.insert(0, os.path.dirname(__file__))
+
+import interview_wandb  # noqa: E402
+import persona_interviews_obfuscation as interview  # noqa: E402
 
 plt.rcParams.update({
     # Font
@@ -88,28 +96,157 @@ PARTY_THERM_ROLES = {
     "Republican": ("republicans", "democrats"),
 }
 
-RESULTS_DIR = os.path.join(os.path.dirname(__file__), "results")
-COMPARISON_FILES = {
-    "No Obfuscation": os.path.join(RESULTS_DIR, "persona_interview_results_20260810_personas_with_bio_500_noVoted2020Year_noAge_noExtendWithAi_noBio__sample50_avg3seeds.csv"),
-    "Neutral":         os.path.join(RESULTS_DIR, "persona_interview_results_20260810_personas_with_bio_500_noVoted2020Year_noAge_noExtendWithAi_noBio_obfNeutral__sample50_avg3seeds.csv"),
-    "Nonce":           os.path.join(RESULTS_DIR, "persona_interview_results_20260810_personas_with_bio_500_noVoted2020Year_noAge_noExtendWithAi_noBio_obfNonce__sample50_avg3seeds.csv"),
-    "RandomNonce":     os.path.join(RESULTS_DIR, "persona_interview_results_20260810_personas_with_bio_500_noVoted2020Year_noAge_noExtendWithAi_noBio_obfRandomNonce__sample50_avg3seeds.csv"),
-    "RandomReal":     os.path.join(RESULTS_DIR, "persona_interview_results_20260810_personas_with_bio_500_noVoted2020Year_noAge_noExtendWithAi_noBio_obfRandomReal__sample50_avg3seeds.csv"),
+# obfuscation (config value) -> comparison-plot display label, in a fixed display
+# order: Real > Neutral > RandomReal > Nonce > RandomNonce.
+OBFUSCATION_LABELS = {
+    "none":         "No Obfuscation",
+    "neutral":      "Neutral",
+    "randomreal":   "RandomReal",
+    "nonce":        "Nonce",
+    "randomnonce":  "RandomNonce",
 }
-COMPARISON_OUTPUT_BARS = os.path.join(os.path.dirname(__file__), "figs", "interview_results_obfuscation.pdf")
-COMPARISON_OUTPUT_TRAITS = os.path.join(os.path.dirname(__file__), "figs", "interview_results_obfuscation_traits.pdf")
-COMPARISON_OUTPUT_TRAITS_DONTKNOW = os.path.join(os.path.dirname(__file__), "figs", "interview_results_obfuscation_traits_dont_know.pdf")
-COMPARISON_OUTPUT_THERM = os.path.join(os.path.dirname(__file__), "figs", "interview_results_obfuscation_thermometer.pdf")
-COMPARISON_OUTPUT_POLARIZATION = os.path.join(os.path.dirname(__file__), "figs", "interview_results_obfuscation_affective_polarization.pdf")
+
+FIGS_DIR = os.path.join(os.path.dirname(__file__), "figs")
 
 
-def load_and_prepare(path: str) -> pd.DataFrame:
-    """Load a pre-aggregated (multi-seed-averaged) results CSV, as produced by
-    `aggregate_interview_runs` in persona_interviews_obfuscation.py: one row per
-    (metric, key, party) with `pct_yes_mean`/`pct_yes_std` (metric == "question")
-    or `rating_mean`/`rating_std` (metric == "thermometer"), averaged across seeds.
-    """
-    return pd.read_csv(path)
+def fig_path(base_name: str, batch_id: str) -> str:
+    """Figure output path, tagged with the batch id so figures from different
+    comparisons don't overwrite each other."""
+    return os.path.join(FIGS_DIR, f"{batch_id}_{base_name}.pdf")
+
+
+POPULATION_METRIC_INFO = {
+    # metric key (see interview_wandb.persona_population_metrics) -> (column header, format spec)
+    "personas/n":                       ("N",              "{:.0f}"),
+    "personas/pct_democrat":            ("% Democrat",     "{:.1%}"),
+    "personas/pct_republican":          ("% Republican",   "{:.1%}"),
+    "personas/pct_non_partisan":        ("% Non-partisan", "{:.1%}"),
+    "personas/avg_feeling_democratic":  ("Avg feeling(D)", "{:.1f}"),
+    "personas/avg_feeling_republican":  ("Avg feeling(R)", "{:.1f}"),
+    "personas/avg_partisan_democrats":  ("Avg partisan(D)", "{:.2f}"),
+    "personas/avg_partisan_republicans": ("Avg partisan(R)", "{:.2f}"),
+    "personas/pct_voted_trump":         ("% Voted Trump",  "{:.1%}"),
+    "personas/pct_voted_biden":         ("% Voted Biden",  "{:.1%}"),
+}
+
+
+def aggregate_population_metrics(raw_dfs: list[pd.DataFrame]) -> dict[str, float]:
+    """Mean of interview_wandb.persona_population_metrics across the seeds within
+    one obfuscation condition — the same persona-attribute distribution that gets
+    logged to wandb under the "personas/" prefix at run time, recomputed here from
+    the downloaded raw per-persona results so it can be printed alongside the
+    question-answer tables."""
+    per_run = [interview_wandb.persona_population_metrics(df) for df in raw_dfs]
+    keys = set().union(*[m.keys() for m in per_run])
+    return {key: pd.Series([m.get(key, float("nan")) for m in per_run], dtype=float).mean() for key in keys}
+
+
+def fetch_condition_dfs(
+    batch_id: str, wandb_project: str = interview_wandb.WANDB_PROJECT
+) -> tuple[dict[str, pd.DataFrame], dict[str, dict[str, float]]]:
+    """Fetch every wandb run sharing `batch_id` (one run per obfuscation x seed,
+    written by run_persona_obf_pipeline.py / persona_interviews_obfuscation.py),
+    download each run's raw per-persona results, and aggregate across seeds within
+    each obfuscation condition — i.e. the same shape `load_and_prepare` used to
+    return from a pre-aggregated local CSV, just sourced from wandb instead.
+
+    Returns (dfs, population), where `dfs` maps condition label -> aggregated
+    question/thermometer results (as before) and `population` maps condition
+    label -> aggregated persona-population attribute stats (see
+    `aggregate_population_metrics`)."""
+    runs = interview_wandb.fetch_runs_by_group(wandb_project, batch_id)
+    if not runs:
+        raise RuntimeError(f"No wandb runs found in project '{wandb_project}' for group '{batch_id}'.")
+
+    runs_by_obfuscation: dict[str, list] = defaultdict(list)
+    for run in runs:
+        runs_by_obfuscation[run.config["obfuscation"]].append(run)
+
+    dfs = {}
+    population = {}
+    for obfuscation, label in OBFUSCATION_LABELS.items():
+        condition_runs = runs_by_obfuscation.get(obfuscation)
+        if not condition_runs:
+            continue
+        raw_dfs = [interview_wandb.download_results_dataframe(run) for run in condition_runs]
+        cfg = condition_runs[0].config
+        questions = interview.build_questions(
+            cfg["trump_label"], cfg["biden_label"], cfg["democrats_label"], cfg["republicans_label"]
+        )
+        thermometer_targets = interview.build_thermometer_targets(
+            cfg["trump_label"], cfg["biden_label"], cfg["democrats_label"], cfg["republicans_label"]
+        )
+        dfs[label] = interview.aggregate_interview_runs(raw_dfs, questions, thermometer_targets)
+        population[label] = aggregate_population_metrics(raw_dfs)
+
+    return dfs, population
+
+
+def print_population_table(population: dict[str, dict[str, float]]) -> None:
+    """Persona population statistics per condition (rows = obfuscation condition),
+    i.e. the attributes of the personas being interviewed, before any LLM answers —
+    the same stats logged to wandb under the "personas/" prefix."""
+    present_metrics = [m for m in POPULATION_METRIC_INFO if any(m in stats for stats in population.values())]
+    if not present_metrics:
+        print("No persona population stats found — skipping.")
+        return
+
+    headers = [POPULATION_METRIC_INFO[m][0] for m in present_metrics]
+    rows = {}
+    for label, stats in population.items():
+        row = {}
+        for m in present_metrics:
+            header = POPULATION_METRIC_INFO[m][0]
+            fmt = POPULATION_METRIC_INFO[m][1]
+            v = stats.get(m)
+            row[header] = fmt.format(v) if v is not None and pd.notna(v) else "n/a"
+        rows[label] = row
+
+    table = pd.DataFrame.from_dict(rows, orient="index", columns=headers)
+    print(f"\n{'='*60}")
+    print("  Persona population statistics (per condition)")
+    print(f"{'='*60}")
+    print(table.to_string())
+
+
+def print_question_tables(
+    dfs: dict[str, pd.DataFrame],
+    keys: list[str],
+    all_parties: list[str],
+    question_labels: dict[str, str],
+    question_texts: dict[str, str],
+    trait_keys: list[str],
+) -> None:
+    """One table per question, rows = obfuscation condition, columns = party
+    identity — lines up every condition's answer to the same question side by
+    side, for every party, instead of splitting them across per-condition blocks."""
+    for key in keys:
+        rows = {}
+        for label, df in dfs.items():
+            subset = df[(df["metric"] == "question") & (df["key"] == key)]
+            if subset.empty:
+                continue
+            row = {}
+            for party in all_parties:
+                r = subset[subset["party"] == party]
+                if r.empty or pd.isna(r.iloc[0]["pct_yes_mean"]):
+                    row[party] = "n/a"
+                    continue
+                rec = r.iloc[0]
+                cell = f"{rec['pct_yes_mean'] * 100:.1f}%"
+                if key in trait_keys and pd.notna(rec["pct_dont_know_mean"]):
+                    cell += f" (dk {rec['pct_dont_know_mean'] * 100:.1f}%)"
+                row[party] = cell
+            rows[label] = row
+
+        if not rows:
+            continue
+
+        q_text = question_labels.get(key, question_texts.get(key, key)).replace("\n", " ")
+        table = pd.DataFrame.from_dict(rows, orient="index", columns=all_parties)
+        print(f"\n  {q_text}")
+        print(table.to_string().replace("\n", "\n  "))
+        print(f"    ({key})")
 
 
 def _lookup(df: pd.DataFrame, metric: str, key: str, party: str, value_col: str, std_col: str) -> tuple[float, float]:
@@ -199,7 +336,9 @@ def plot_metric_comparison(
     print(f"Saved to {output_path}")
 
 
-def plot_thermometer_comparison(dfs: dict[str, pd.DataFrame], all_parties: list[str], condition_colors: dict[str, str]) -> None:
+def plot_thermometer_comparison(
+    dfs: dict[str, pd.DataFrame], all_parties: list[str], condition_colors: dict[str, str], output_path: str
+) -> None:
     therm_keys = [(role, label) for role, label in THERMOMETER_TARGETS
                   if all(((df["metric"] == "thermometer") & (df["key"] == role)).any() for df in dfs.values())]
     if not therm_keys:
@@ -244,10 +383,10 @@ def plot_thermometer_comparison(dfs: dict[str, pd.DataFrame], all_parties: list[
     handles = [plt.Rectangle((0, 0), 1, 1, color=condition_colors.get(l, "#888888")) for l in labels]
     fig.legend(handles, labels, loc="upper right", frameon=False)
     fig.tight_layout(pad=1.2, rect=[0, 0, 1, 0.94])
-    fig.savefig(COMPARISON_OUTPUT_THERM, dpi=300, bbox_inches='tight', facecolor='white')
-    fig.savefig(COMPARISON_OUTPUT_THERM.replace('.pdf', '.png'), dpi=300, bbox_inches='tight', facecolor='white')
+    fig.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
+    fig.savefig(output_path.replace('.pdf', '.png'), dpi=300, bbox_inches='tight', facecolor='white')
     plt.close(fig)
-    print(f"Saved to {COMPARISON_OUTPUT_THERM}")
+    print(f"Saved to {output_path}")
 
     for label, df in dfs.items():
         print(f"\n{'='*60}")
@@ -263,7 +402,9 @@ def plot_thermometer_comparison(dfs: dict[str, pd.DataFrame], all_parties: list[
                 print(f"    {party:<30} {r['rating_mean']:5.1f}  (avg_n={r['avg_n']:.1f}, n_runs={int(r['n_runs'])})")
 
 
-def plot_affective_polarization_comparison(dfs: dict[str, pd.DataFrame], condition_colors: dict[str, str]) -> None:
+def plot_affective_polarization_comparison(
+    dfs: dict[str, pd.DataFrame], condition_colors: dict[str, str], output_path: str
+) -> None:
     labels  = list(dfs.keys())
     parties = [p for p in PARTY_THERM_ROLES
                if any((df["party"] == p).any() for df in dfs.values())]
@@ -317,10 +458,10 @@ def plot_affective_polarization_comparison(dfs: dict[str, pd.DataFrame], conditi
     handles = [plt.Rectangle((0, 0), 1, 1, color=condition_colors.get(l, "#888888")) for l in labels]
     fig.legend(handles, labels, loc="upper right", frameon=False)
     fig.tight_layout(pad=1.2, rect=[0, 0, 1, 0.94])
-    fig.savefig(COMPARISON_OUTPUT_POLARIZATION, dpi=300, bbox_inches='tight', facecolor='white')
-    fig.savefig(COMPARISON_OUTPUT_POLARIZATION.replace('.pdf', '.png'), dpi=300, bbox_inches='tight', facecolor='white')
+    fig.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
+    fig.savefig(output_path.replace('.pdf', '.png'), dpi=300, bbox_inches='tight', facecolor='white')
     plt.close(fig)
-    print(f"Saved to {COMPARISON_OUTPUT_POLARIZATION}")
+    print(f"Saved to {output_path}")
 
     for label, df in dfs.items():
         print(f"\n{'='*60}")
@@ -334,8 +475,24 @@ def plot_affective_polarization_comparison(dfs: dict[str, pd.DataFrame], conditi
             print(f"    {party:<30} {v:6.1f}")
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Load a batch of obfuscation-comparison persona-interview runs from wandb "
+                     "and plot yes/no + feeling-thermometer results by party."
+    )
+    parser.add_argument("--batch_id", type=str, required=True,
+                         help="Wandb group/batch id shared by the runs to compare "
+                              "(printed by run_persona_obf_pipeline.py after it finishes).")
+    parser.add_argument("--wandb_project", type=str, default=interview_wandb.WANDB_PROJECT,
+                         help="Wandb project the runs were logged to.")
+    return parser.parse_args()
+
+
 def main() -> None:
-    dfs = {label: load_and_prepare(path) for label, path in COMPARISON_FILES.items()}
+    args = parse_args()
+    dfs, population = fetch_condition_dfs(args.batch_id, wandb_project=args.wandb_project)
+
+    print_population_table(population)
 
     follow_keys = ['q1_dem', 'q1_rep', 'q2', 'q3', 'q4', 'q5']
     trait_keys  = ([f"dem_{key}" for key, _ in TRAIT_QUESTIONS]
@@ -383,41 +540,27 @@ def main() -> None:
     # (unlike the ablation comparison), so a grouped bar chart per condition
     # is the honest comparison — a connecting line would imply an ordering that isn't there.
     plot_metric_comparison(dfs, follow_present, all_parties, condition_colors,
-                            COMPARISON_OUTPUT_BARS, "question", "pct_yes_mean", "pct_yes_std",
+                            fig_path("interview_results_obfuscation", args.batch_id), "question", "pct_yes_mean", "pct_yes_std",
                             ncols=len(follow_present) or 1)
     # Trait battery: one row for Democrats, one for Republicans, columns aligned by trait.
     plot_metric_comparison(dfs, trait_present, all_parties, condition_colors,
-                            COMPARISON_OUTPUT_TRAITS, "question", "pct_yes_mean", "pct_yes_std",
+                            fig_path("interview_results_obfuscation_traits", args.batch_id), "question", "pct_yes_mean", "pct_yes_std",
                             ncols=len(TRAIT_QUESTIONS))
     # Trait "dont_know" rate: makes forced-choice artifacts (non-partisans with no
     # basis to judge an obfuscated group) visible instead of them defaulting to "No".
     plot_metric_comparison(dfs, dont_know_present, all_parties, condition_colors,
-                            COMPARISON_OUTPUT_TRAITS_DONTKNOW, "question", "pct_dont_know_mean", "pct_dont_know_std",
+                            fig_path("interview_results_obfuscation_traits_dont_know", args.batch_id), "question", "pct_dont_know_mean", "pct_dont_know_std",
                             ncols=len(TRAIT_QUESTIONS), ylabel="Fraction answering \"don't know\"")
 
-    for label, df in dfs.items():
-        print(f"\n{'='*60}")
-        print(f"  {label}")
-        print(f"{'='*60}")
-        for key in all_keys:
-            rows = df[(df["metric"] == "question") & (df["key"] == key)]
-            if rows.empty:
-                continue
-            q_text = question_labels.get(key, question_texts.get(key, key)).replace("\n", " ")
-            print(f"\n  {q_text}")
-            for party in all_parties:
-                row = rows[rows["party"] == party]
-                if row.empty:
-                    continue
-                r = row.iloc[0]
-                pct_str = f"{r['pct_yes_mean'] * 100:5.1f}%" if pd.notna(r['pct_yes_mean']) else "  n/a"
-                line = f"    {party:<30} {pct_str}  (avg_n={r['avg_n']:.1f}"
-                if key in trait_keys and pd.notna(r['pct_dont_know_mean']):
-                    line += f", dont_know={r['pct_dont_know_mean'] * 100:4.1f}%"
-                print(line + ")")
+    print(f"\n{'='*60}")
+    print("  Question answers (rows = obfuscation condition, columns = party)")
+    print(f"{'='*60}")
+    print_question_tables(dfs, all_keys, all_parties, question_labels, question_texts, trait_keys)
 
-    plot_thermometer_comparison(dfs, all_parties, condition_colors)
-    plot_affective_polarization_comparison(dfs, condition_colors)
+    plot_thermometer_comparison(dfs, all_parties, condition_colors,
+                                 fig_path("interview_results_obfuscation_thermometer", args.batch_id))
+    plot_affective_polarization_comparison(dfs, condition_colors,
+                                            fig_path("interview_results_obfuscation_affective_polarization", args.batch_id))
 
 
 if __name__ == "__main__":

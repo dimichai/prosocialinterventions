@@ -651,15 +651,20 @@ def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=Fal
 
         l['fishing'] = d['V202567']
 
+        # Voted in 2020 election
+        l['voted2020_for'] = d['vote2020'] if d['vote2020'] in ['Donald Trump', 'Joe Biden'] else None
+        l['voted2020'] = l['voted2020_for'] is not None
+
         if not ignore_voted2020:
-            if d['vote2020'] in ['Donald Trump','Joe Biden']:
+            if l['voted2020']:
                 year_suffix = "" if ignore_voted2020_year else " in 2020"
-                l['persona'] += f"You voted for {obf(d['vote2020'], obfuscation_map)}{year_suffix}.\n"
-                l['voted2020'] = True
-                l['voted2020_for'] = d['vote2020']
+                l['persona'] += f"You voted for {obf(l['voted2020_for'], obfuscation_map)}{year_suffix}.\n"
             else:
-                l['persona'] += ("You didn't vote.\n" if ignore_voted2020_year else "You didn't vote in 2020.\n")
-                l['voted2020'] = False
+                l['persona'] += obf(
+                    "You didn't vote." if ignore_voted2020_year else "You didn't vote in 2020.",
+                    obfuscation_map
+                ) + "\n"
+
         if not ignore_party_identity:
             #Generate party affiliation
             if l['partisan'] == 0:

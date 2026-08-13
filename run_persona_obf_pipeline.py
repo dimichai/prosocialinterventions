@@ -47,6 +47,11 @@ def parse_args() -> argparse.Namespace:
     
     parser.add_argument("--ignore_voted2020_year", action='store_true', default=False, help="Whether to omit 'in 2020' from the voted2020 sentence (candidate/no-vote is still stated)")
     parser.add_argument("--ignore_age", action='store_true', default=False, help="Whether to omit the age sentence from the persona text")
+    parser.add_argument("--ignore_ideology", action='store_true', default=False, help="Omit the liberal/conservative self-placement sentence")
+    parser.add_argument("--ignore_political_behaviour", action='store_true', default=False, help="Omit political-behaviour sentences: violence justification, gun ownership, arguing about politics, never talking about politics")
+    parser.add_argument("--ignore_leisure", action='store_true', default=False, help="Omit leisure sentences: fishing/hunting and TV programs")
+    parser.add_argument("--ignore_problems", action='store_true', default=False, help="Omit the most-important-problems sentence")
+    parser.add_argument("--ignore_religion", action='store_true', default=False, help="Omit the religion sentence (robustness check: religion is near-diagnostic of party in the unobfuscated condition)")
     parser.add_argument("--ignore_extend_with_ai", action='store_true', default=False, help="Whether to skip extending personas with AI-generated occupation/hobbies")
     parser.add_argument("--ignore_bio", action='store_true', default=False, help="Whether to skip generating a biography for the persona entirely")
     parser.add_argument("--gen_seed", type=int, default=42, help="Random seed for persona sampling and AI extension choices")
@@ -65,6 +70,11 @@ def parse_args() -> argparse.Namespace:
                          help="Wandb project to log interview runs to.")
     parser.add_argument("--no_log", action='store_true', default=False,
                          help="Skip wandb logging entirely (e.g. for local debugging runs).")
+    parser.add_argument("--include_group_context", action='store_true', default=False,
+                         help="Prepend a short paragraph to each persona's system message naming "
+                              "the two rival political affiliations and their leader. Applied in "
+                              "every obfuscation condition (including 'none') so it doesn't confound "
+                              "the obfuscation comparison; see persona_interviews_obfuscation.py.")
 
     return parser.parse_args()
 
@@ -74,7 +84,9 @@ def main() -> None:
 
     gen_arg_names = [
         "num_personas", "ignore_love_hate", "ignore_party_identity", "ignore_voted2020",
-        "ignore_voted2020_year", "ignore_age", "ignore_extend_with_ai", "ignore_bio",
+        "ignore_voted2020_year", "ignore_age", "ignore_ideology", "ignore_political_behaviour",
+        "ignore_leisure", "ignore_problems", "ignore_religion",
+        "ignore_extend_with_ai", "ignore_bio",
         "ignore_bio_love_hate", "ignore_bio_party_identity", "ignore_bio_voted2020",
     ]
 
@@ -112,6 +124,7 @@ def main() -> None:
             extra_config=extra_config,
             log=not args.no_log,
             wandb_project=args.wandb_project,
+            include_group_context=args.include_group_context,
         )
         print(f"Interviewed -> {interview_result}")
 

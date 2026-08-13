@@ -101,6 +101,27 @@ def build_questions(
     ]
 
 
+def build_group_context(
+    trump_label: str, biden_label: str, democrats_label: str, republicans_label: str
+) -> str:
+    """A short scene-setting paragraph naming the two rival political affiliations
+    and their associated leader, using whatever labels (real or obfuscated) are in
+    play. Personas already have their own affiliation/leader in their bio, but under
+    obfuscation the *opposing* party's label is often never mentioned anywhere in
+    their persona text — so without this, the model has no basis at all for
+    answering questions about that opposing label (it's just an unrecognized
+    string). This gives the minimal relational grounding needed to answer, without
+    revealing which (real-world) party either obfuscated label maps to."""
+    return (
+        f"For context: {democrats_label} and {republicans_label} are the two rival "
+        "political affiliations in this society — every adult identifies with one "
+        "of them, the other, or neither. "
+        f"{biden_label} and {trump_label} are the two most prominent national "
+        f"political leaders, with {biden_label} aligned with {democrats_label} and "
+        f"{trump_label} aligned with {republicans_label}."
+    )
+
+
 def build_thermometer_targets(
     trump_label: str, biden_label: str, democrats_label: str, republicans_label: str
 ) -> list[tuple[str, str]]:
@@ -132,15 +153,19 @@ class ThermometerAnswer(BaseModel):
     rating: int | None   # 0-100, None if not recognized
 
 
-def _system_message(persona: dict) -> str:
-    return (
+def _system_message(persona: dict, group_context: str = "") -> str:
+    message = (
         "Here is a description of your persona:\n"
         f"{persona['persona']}"
     )
+    if group_context:
+        message += f"\n\n{group_context}"
+    return message
 
 
 def ask_question(
-    client: OpenAI, persona: dict, question: str, model: str, allow_dont_know: bool = False
+    client: OpenAI, persona: dict, question: str, model: str,
+    allow_dont_know: bool = False, group_context: str = "",
 ) -> tuple[bool | str | None, str]:
     """Send a question to the LLM and return (answer, explanation).
 
@@ -167,7 +192,7 @@ def ask_question(
             response = client.beta.chat.completions.parse(
                 model=model,
                 messages=[
-                    {"role": "system", "content": _system_message(persona)},
+                    {"role": "system", "content": _system_message(persona, group_context)},
                     {"role": "user", "content": f"{question}\n\n{instruction}"},
                 ],
                 response_format=response_format,
@@ -185,7 +210,9 @@ def ask_question(
     return None, "ERROR: response truncated (length limit reached) after retry"
 
 
-def ask_feeling_thermometer_single(client: OpenAI, persona: dict, label: str, model: str) -> tuple[bool | None, int | None]:
+def ask_feeling_thermometer_single(
+    client: OpenAI, persona: dict, label: str, model: str, group_context: str = "",
+) -> tuple[bool | None, int | None]:
     """Rate a single thermometer target in its own call, with no other target in context."""
 
     prompt = (
@@ -200,7 +227,7 @@ def ask_feeling_thermometer_single(client: OpenAI, persona: dict, label: str, mo
             response = client.beta.chat.completions.parse(
                 model=model,
                 messages=[
-                    {"role": "system", "content": _system_message(persona)},
+                    {"role": "system", "content": _system_message(persona, group_context)},
                     {"role": "user", "content": prompt},
                 ],
                 response_format=ThermometerAnswer,
@@ -215,13 +242,15 @@ def ask_feeling_thermometer_single(client: OpenAI, persona: dict, label: str, mo
     return None, None
 
 
-def ask_feeling_thermometer(client: OpenAI, persona: dict, targets: list[tuple[str, str]], model: str) -> dict:
+def ask_feeling_thermometer(
+    client: OpenAI, persona: dict, targets: list[tuple[str, str]], model: str, group_context: str = "",
+) -> dict:
     """Rate each thermometer target with a separate call (avoids order/anchoring
     effects from batching multiple targets into one comparative call)."""
 
     row = {}
     for role, label in targets:
-        recognized, rating = ask_feeling_thermometer_single(client, persona, label, model)
+        recognized, rating = ask_feeling_thermometer_single(client, persona, label, model, group_context)
         row[f"{role}_therm_recognized"] = recognized
         row[f"{role}_therm_rating"]     = rating
     return row
@@ -234,6 +263,7 @@ def interview_personas(
     model: str,
     persona_sample: int | None = None,
     seed: int = 42,
+    group_context: str = "",
 ) -> pd.DataFrame:
 
     dotenv.load_dotenv(os.path.join(os.path.dirname(__file__), "../../.env"))
@@ -284,11 +314,14 @@ def interview_personas(
 
         for key, question in active_questions:
             allow_dont_know = key.startswith(("dem_", "rep_"))
-            answer, explanation = ask_question(client, persona, question, model, allow_dont_know=allow_dont_know)
+            answer, explanation = ask_question(
+                client, persona, question, model,
+                allow_dont_know=allow_dont_know, group_context=group_context,
+            )
             row[f"{key}_answer"]      = answer          # True / False / "dont_know"
             row[f"{key}_explanation"] = explanation
 
-        row.update(ask_feeling_thermometer(client, persona, thermometer_targets, model))
+        row.update(ask_feeling_thermometer(client, persona, thermometer_targets, model, group_context))
 
         results.append(row)
 
@@ -411,6 +444,12 @@ def parse_args() -> argparse.Namespace:
                          help="Wandb project to log interview runs to.")
     parser.add_argument("--no_log", action="store_true", default=False,
                          help="Skip wandb logging entirely (e.g. for local debugging runs).")
+    parser.add_argument("--include_group_context", action="store_true", default=False,
+                         help="Prepend a short paragraph to each persona's system message naming "
+                              "the two rival political affiliations and their leader (see "
+                              "build_group_context). Applied in every obfuscation condition, "
+                              "including 'none', so it stays the only thing that's off by default "
+                              "rather than a confound between conditions.")
     return parser.parse_args()
 
 
@@ -423,6 +462,7 @@ def run_interview_for_setting(
     extra_config: dict | None = None,
     log: bool = True,
     wandb_project: str = interview_wandb.WANDB_PROJECT,
+    include_group_context: bool = False,
 ) -> dict:
     """Interview the personas in src/<personas_setting>.json, once per seed, logging
     each seed's raw per-persona results to wandb as its own run (all sharing one
@@ -438,6 +478,15 @@ def run_interview_for_setting(
     personas_file = os.path.join(os.path.dirname(__file__), f"../../src/{personas_setting}.json")
 
     obfuscation = (extra_config or {}).get("obfuscation") or _infer_obfuscation(personas_setting)
+    # When enabled, applied in every condition, including "none" — the
+    # label-recognition problem this solves is specific to obfuscation, but
+    # injecting it unconditionally keeps every condition's prompt structure
+    # identical except for the labels themselves, so obfuscation stays the only
+    # manipulated variable.
+    group_context = (
+        build_group_context(trump_label, biden_label, democrats_label, republicans_label)
+        if include_group_context else ""
+    )
     base_config = {
         "obfuscation": obfuscation,
         "personas_setting": personas_setting,
@@ -448,6 +497,8 @@ def run_interview_for_setting(
         "biden_label": biden_label,
         "democrats_label": democrats_label,
         "republicans_label": republicans_label,
+        "include_group_context": include_group_context,
+        "group_context": group_context,
     }
     if extra_config:
         base_config.update(extra_config)
@@ -481,6 +532,7 @@ def run_interview_for_setting(
             model=model,
             persona_sample=persona_sample,
             seed=seed,
+            group_context=group_context,
         )
 
         if log:
@@ -502,6 +554,7 @@ def main() -> None:
     result = run_interview_for_setting(
         args.personas_setting, args.model, args.persona_sample, args.seed,
         log=not args.no_log, wandb_project=args.wandb_project,
+        include_group_context=args.include_group_context,
     )
     print(result)
 

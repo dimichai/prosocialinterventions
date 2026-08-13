@@ -265,6 +265,96 @@ def _lookup(df: pd.DataFrame, metric: str, key: str, party: str, value_col: str,
     return float(value), float(err)
 
 
+def _draw_table_panel(
+    fig: plt.Figure,
+    outer_spec,
+    labels: list[str],
+    columns: list[str],
+    condition_colors: dict[str, str],
+    value_fn,
+    xlim: tuple[float, float],
+    title: str,
+    value_fmt: str = "{:.0%}",
+) -> None:
+    """Draw one "table" panel inside `outer_spec`: rows = obfuscation condition
+    (`labels`), columns = `columns` (e.g. party), each cell a single horizontal
+    bar for `value_fn(label, column) -> (value, error)`. Row 0 of the inner grid
+    is the panel title, row 1 the column (party) headers — both dedicated rows,
+    rather than relying on matplotlib's floating axes-title padding, which
+    overlaps neighboring rows once cells get short.
+    """
+    n_datasets = len(labels)
+    n_cols = len(columns)
+    title_lines = title.count("\n") + 1
+    title_row_h = 0.7 * title_lines + 0.4
+    header_row_h = 0.6
+    inner = outer_spec.subgridspec(n_datasets + 2, n_cols, hspace=0.15, wspace=0.15,
+                                    height_ratios=[title_row_h, header_row_h] + [1] * n_datasets)
+
+    title_ax = fig.add_subplot(inner[0, :])
+    title_ax.axis("off")
+    title_ax.text(0.5, 0.05, title, ha="center", va="bottom", fontsize=10,
+                  fontweight="medium", transform=title_ax.transAxes)
+
+    for c_idx, column in enumerate(columns):
+        header_ax = fig.add_subplot(inner[1, c_idx])
+        header_ax.axis("off")
+        header_ax.text(0.5, 0.1, str(column), ha="center", va="bottom",
+                        fontsize=8.5, fontweight="medium", transform=header_ax.transAxes)
+
+    zero_x = 0 if xlim[0] <= 0 <= xlim[1] else xlim[0]
+    span = xlim[1] - xlim[0]
+
+    for d_idx, label in enumerate(labels):
+        color = condition_colors.get(label, "#888888")
+        for c_idx, column in enumerate(columns):
+            ax = fig.add_subplot(inner[d_idx + 2, c_idx])
+            v, e = value_fn(label, column)
+            if not (isinstance(v, float) and math.isnan(v)):
+                err = 0.0 if (e is None or (isinstance(e, float) and math.isnan(e))) else e
+                ax.barh(0, v, xerr=err or None, height=0.55, color=color, capsize=2,
+                        error_kw={"elinewidth": 0.7, "capthick": 0.7}, zorder=3)
+                # Label goes outside the bar/error-cap by default; but if that would
+                # overflow this axes' xlim, an outside label bleeds into the next
+                # column's (opaque) subplot and gets hidden behind it — so switch to
+                # placing it inside the bar instead whenever it's too close to the edge.
+                offset = span * 0.03
+                if v >= 0:
+                    if v + err > xlim[1] - span * 0.12:
+                        ax.text(v - offset, 0, value_fmt.format(v), va="center",
+                                ha="right", fontsize=6.5, color="white", clip_on=True, zorder=4)
+                    else:
+                        ax.text(v + err + offset, 0, value_fmt.format(v), va="center", ha="left",
+                                fontsize=6.5, color="#333333", clip_on=False)
+                else:
+                    if v - err < xlim[0] + span * 0.12:
+                        ax.text(v + offset, 0, value_fmt.format(v), va="center",
+                                ha="left", fontsize=6.5, color="white", clip_on=True, zorder=4)
+                    else:
+                        ax.text(v - err - offset, 0, value_fmt.format(v), va="center", ha="right",
+                                fontsize=6.5, color="#333333", clip_on=False)
+            else:
+                ax.text((xlim[0] + xlim[1]) / 2, 0, "n/a", va="center", ha="center",
+                        fontsize=6.5, color="#999999")
+            ax.set_xlim(*xlim)
+            ax.set_ylim(-0.7, 0.7)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            for spine in ax.spines.values():
+                spine.set_visible(False)
+            ax.axvline(zero_x, color="#dddddd", linewidth=0.6, zorder=0)
+            if c_idx == 0:
+                ax.text(-0.08, 0.5, label, transform=ax.transAxes, ha="right",
+                        va="center", fontsize=7)
+
+
+MAX_GRID_COLS = 3
+
+# Row labels (condition names, drawn inside each panel by _draw_table_panel)
+# already identify color/condition, so no legend is needed.
+TOP_PAD = 0.96
+
+
 def plot_metric_comparison(
     dfs: dict[str, pd.DataFrame],
     keys: list[tuple[str, str]],
@@ -275,10 +365,13 @@ def plot_metric_comparison(
     value_col: str,
     std_col: str,
     ncols: int | None = None,
-    ylabel: str = "Fraction answering Yes",
-    ylim: tuple[float, float] = (0, 1),
+    value_label: str = "Fraction answering Yes",
+    xlim: tuple[float, float] = (0, 1),
+    value_fmt: str = "{:.0%}",
 ) -> None:
-    """Grouped bar chart of a per-party summary statistic, one panel per question/target.
+    """Table of horizontal bars, one panel per question/target: within each panel,
+    rows = obfuscation condition, columns = party, cell = a single horizontal bar
+    for that condition/party's value.
 
     Panels wrap onto multiple rows (ncols per row) so this scales from a
     handful of questions up to a full trait battery without one absurdly wide row.
@@ -292,44 +385,25 @@ def plot_metric_comparison(
     n_datasets = len(labels)
     n_parties  = len(all_parties)
 
-    ncols = ncols or n_panels
+    ncols = min(ncols or n_panels, MAX_GRID_COLS)
     nrows = -(-n_panels // ncols)  # ceil division
 
-    group_width = 0.8
-    bar_width   = group_width / n_datasets
-    group_centers = list(range(n_parties))
+    panel_w = 1.1 * n_parties + 1.0
+    panel_h = 0.4 * (n_datasets + 1) + 0.5
+    fig = plt.figure(figsize=(panel_w * ncols, panel_h * nrows))
+    outer = fig.add_gridspec(nrows, ncols, hspace=0.25, wspace=0.4,
+                              left=0.08, right=0.97, top=TOP_PAD, bottom=0.04)
 
-    fig, axes = plt.subplots(nrows, ncols, figsize=(4 * ncols, 4.5 * nrows), sharey=True, squeeze=False)
-    flat_axes = list(axes.flat)
+    for idx, (key, title) in enumerate(keys):
+        r, c = divmod(idx, ncols)
 
-    for ax, (key, title) in zip(flat_axes, keys):
-        for d_idx, label in enumerate(labels):
-            vals, errs = [], []
-            for party in all_parties:
-                v, e = _lookup(dfs[label], metric, key, party, value_col, std_col)
-                vals.append(v)
-                errs.append(e)
-            color = condition_colors.get(label, "#888888")
-            positions = [c - group_width / 2 + bar_width * (d_idx + 0.5) for c in group_centers]
-            ax.bar(positions, vals, width=bar_width * 0.9, yerr=errs, color=color,
-                   capsize=2, error_kw={"elinewidth": 0.8, "capthick": 0.8})
+        def value_fn(label, party, _key=key):
+            return _lookup(dfs[label], metric, _key, party, value_col, std_col)
 
-        ax.set_title(title, fontweight='medium', pad=8, fontsize=10)
-        ax.set_xticks(group_centers)
-        ax.set_xticklabels(all_parties, rotation=15)
-        ax.set_ylim(*ylim)
-        ax.yaxis.set_major_locator(plt.MaxNLocator(5))
-        ax.yaxis.grid(True, linestyle='-', alpha=0.15, color='#333333')
-        ax.set_axisbelow(True)
+        _draw_table_panel(fig, outer[r, c], labels, all_parties, condition_colors,
+                           value_fn, xlim, title, value_fmt)
 
-    for ax in flat_axes[n_panels:]:
-        ax.axis("off")
-    for row in range(nrows):
-        axes[row, 0].set_ylabel(ylabel)
-
-    handles = [plt.Rectangle((0, 0), 1, 1, color=condition_colors.get(l, "#888888")) for l in labels]
-    fig.legend(handles, labels, loc="upper right", frameon=False)
-    fig.tight_layout(pad=1.2, rect=[0, 0, 1, 0.94])
+    fig.text(0.01, 0.5, value_label, va="center", rotation="vertical", fontsize=10, color="#555555")
     fig.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
     fig.savefig(output_path.replace('.pdf', '.png'), dpi=300, bbox_inches='tight', facecolor='white')
     plt.close(fig)
@@ -345,44 +419,30 @@ def plot_thermometer_comparison(
         print("No feeling-thermometer rows found in the comparison CSVs — skipping thermometer comparison plot.")
         return
 
-    labels     = list(dfs.keys())
+    labels      = list(dfs.keys())
     n_questions = len(therm_keys)
     n_datasets  = len(labels)
     n_parties   = len(all_parties)
 
-    group_width = 0.8
-    bar_width   = group_width / n_datasets
-    group_centers = list(range(n_parties))
+    ncols = min(n_questions, MAX_GRID_COLS)
+    nrows = -(-n_questions // ncols)  # ceil division
 
-    fig, axes = plt.subplots(1, n_questions, figsize=(4 * n_questions, 4.5), sharey=True)
-    if n_questions == 1:
-        axes = [axes]
+    panel_w = 1.1 * n_parties + 1.0
+    panel_h = 0.4 * (n_datasets + 1) + 0.9
+    fig = plt.figure(figsize=(panel_w * ncols, panel_h * nrows))
+    outer = fig.add_gridspec(nrows, ncols, hspace=0.25, wspace=0.4, left=0.08, right=0.97,
+                              top=TOP_PAD, bottom=0.04)
 
-    for ax, (role, person_label) in zip(axes, therm_keys):
-        for d_idx, label in enumerate(labels):
-            vals, errs = [], []
-            for party in all_parties:
-                v, e = _lookup(dfs[label], "thermometer", role, party, "rating_mean", "rating_std")
-                vals.append(v)
-                errs.append(e)
-            color = condition_colors.get(label, "#888888")
-            positions = [c - group_width / 2 + bar_width * (d_idx + 0.5) for c in group_centers]
-            ax.bar(positions, vals, width=bar_width * 0.9, yerr=errs, color=color,
-                   capsize=2, error_kw={"elinewidth": 0.8, "capthick": 0.8})
+    for idx, (role, person_label) in enumerate(therm_keys):
+        r, c = divmod(idx, ncols)
 
-        ax.set_title(f"Feeling thermometer:\n{person_label}\n(obfuscated per condition)",
-                     fontweight='medium', pad=8)
-        ax.set_xticks(group_centers)
-        ax.set_xticklabels(all_parties, rotation=15)
-        ax.set_ylim(0, 100)
-        ax.yaxis.set_major_locator(plt.MaxNLocator(5))
-        ax.yaxis.grid(True, linestyle='-', alpha=0.15, color='#333333')
-        ax.set_axisbelow(True)
+        def value_fn(label, party, _role=role):
+            return _lookup(dfs[label], "thermometer", _role, party, "rating_mean", "rating_std")
 
-    axes[0].set_ylabel("Mean rating (0-100)")
-    handles = [plt.Rectangle((0, 0), 1, 1, color=condition_colors.get(l, "#888888")) for l in labels]
-    fig.legend(handles, labels, loc="upper right", frameon=False)
-    fig.tight_layout(pad=1.2, rect=[0, 0, 1, 0.94])
+        _draw_table_panel(fig, outer[r, c], labels, all_parties, condition_colors, value_fn,
+                           (0, 100), f"Feeling thermometer: {person_label}\n(obfuscated per condition)", "{:.0f}")
+
+    fig.text(0.01, 0.5, "Mean rating (0-100)", va="center", rotation="vertical", fontsize=10, color="#555555")
     fig.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
     fig.savefig(output_path.replace('.pdf', '.png'), dpi=300, bbox_inches='tight', facecolor='white')
     plt.close(fig)
@@ -428,36 +488,17 @@ def plot_affective_polarization_comparison(
     n_parties  = len(parties)
     n_datasets = len(labels)
 
-    group_width = 0.8
-    bar_width   = group_width / n_datasets
-    group_centers = list(range(n_parties))
+    def value_fn(label, party):
+        return polarization(dfs[label], party)
 
-    fig, ax = plt.subplots(figsize=(4 * n_parties, 4.5))
+    panel_w = 1.1 * n_parties + 1.0
+    panel_h = 0.4 * (n_datasets + 1) + 0.9
+    fig = plt.figure(figsize=(panel_w, panel_h))
+    outer = fig.add_gridspec(1, 1, left=0.16, right=0.95, top=TOP_PAD, bottom=0.06)
 
-    for d_idx, label in enumerate(labels):
-        vals, errs = [], []
-        for party in parties:
-            v, e = polarization(dfs[label], party)
-            vals.append(v)
-            errs.append(e)
-        color = condition_colors.get(label, "#888888")
-        positions = [c - group_width / 2 + bar_width * (d_idx + 0.5) for c in group_centers]
-        ax.bar(positions, vals, width=bar_width * 0.9, yerr=errs, color=color,
-               capsize=2, error_kw={"elinewidth": 0.8, "capthick": 0.8})
+    _draw_table_panel(fig, outer[0, 0], labels, parties, condition_colors, value_fn, (-100, 100),
+                       "Affective polarization\n(own-party rating minus opposing-party rating)", "{:.0f}")
 
-    ax.axhline(0, color="#333333", linewidth=0.8)
-    ax.set_title("Affective polarization\n(own-party rating minus opposing-party rating)",
-                 fontweight='medium', pad=8)
-    ax.set_xticks(group_centers)
-    ax.set_xticklabels(parties, rotation=15)
-    ax.set_ylabel("Mean rating difference (own − opposing)")
-    ax.yaxis.set_major_locator(plt.MaxNLocator(5))
-    ax.yaxis.grid(True, linestyle='-', alpha=0.15, color='#333333')
-    ax.set_axisbelow(True)
-
-    handles = [plt.Rectangle((0, 0), 1, 1, color=condition_colors.get(l, "#888888")) for l in labels]
-    fig.legend(handles, labels, loc="upper right", frameon=False)
-    fig.tight_layout(pad=1.2, rect=[0, 0, 1, 0.94])
     fig.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
     fig.savefig(output_path.replace('.pdf', '.png'), dpi=300, bbox_inches='tight', facecolor='white')
     plt.close(fig)
@@ -550,7 +591,7 @@ def main() -> None:
     # basis to judge an obfuscated group) visible instead of them defaulting to "No".
     plot_metric_comparison(dfs, dont_know_present, all_parties, condition_colors,
                             fig_path("interview_results_obfuscation_traits_dont_know", args.batch_id), "question", "pct_dont_know_mean", "pct_dont_know_std",
-                            ncols=len(TRAIT_QUESTIONS), ylabel="Fraction answering \"don't know\"")
+                            ncols=len(TRAIT_QUESTIONS), value_label="Fraction answering \"don't know\"")
 
     print(f"\n{'='*60}")
     print("  Question answers (rows = obfuscation condition, columns = party)")

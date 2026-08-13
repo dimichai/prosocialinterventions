@@ -69,7 +69,7 @@ def obf(value, mapping):
 
 
 # This code fetches lines from the ANES, and returns as readable dict
-def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=False, ignore_voted2020=False, ignore_voted2020_year=False, ignore_age=False, obfuscation='none', seed=42):
+def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=False, ignore_voted2020=False, ignore_voted2020_year=False, ignore_age=False, ignore_ideology=False, ignore_political_behaviour=False, ignore_leisure=False, ignore_problems=False, ignore_religion=False, obfuscation='none', seed=42):
 
     obfuscation_map = load_obfuscation_map(obfuscation)
 
@@ -619,7 +619,7 @@ def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=Fal
         
         religions = {1: 'Protestant', 2: 'Evangelical Protestant', 3: 'Black Protestant', 4: 'Protestant',  5: 'Catholic', 6: 'Christian', 7: 'Jewish', 9: 'not religious'}
         l['religion'] = d['V201458x']
-        if d['V201458x'] in list(religions.keys()):
+        if not ignore_religion and d['V201458x'] in list(religions.keys()):
             l['persona'] += f"You are {obf(religions[d['V201458x']], obfuscation_map)}.\n"
 
         l['state'] = d['state']
@@ -639,14 +639,12 @@ def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=Fal
         l['party'] = 'Democrat' if l['partisan'] < 0 else 'Republican' if l['partisan'] > 0 else 'Non-partisan'        
         
         #People who never talk about politics: we add other preferences
-        if d['V202545'] == 5: # V202023
+        l['never_talk_politics'] = (d['V202545'] == 5)
+        if not ignore_political_behaviour and l['never_talk_politics']: # V202023
             l['persona'] += obf("You never talk about politics.", obfuscation_map) + "\n"
-            l['never_talk_politics'] = True
-        else:
-            l['never_talk_politics'] = False
 
         #Fishing
-        if d['V202567'] == 1:
+        if not ignore_leisure and d['V202567'] == 1:
             l['persona'] += obf("You like to go fishing or hunting.", obfuscation_map) + "\n"
 
         l['fishing'] = d['V202567']
@@ -684,7 +682,7 @@ def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=Fal
 
         l['justifiedViolence'] = d['justifiedViolence']
 
-        if d['justifiedViolence'] in [3,4,5]:
+        if not ignore_political_behaviour and d['justifiedViolence'] in [3,4,5]:
             l['persona'] += obf("You think political violence is justified.", obfuscation_map) + "\n"
 
         if not ignore_love_hate:
@@ -697,30 +695,31 @@ def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=Fal
 
         l['arguePolitics'] =d['V202545']== 1 or d['V202545']== 2
         #You post online a lot or always about politics, or you get into political argument in the last 12 months
-        if d['V202545']== 1 or d['V202545']== 2: #d['V202024']== 1 or
+        if not ignore_political_behaviour and (d['V202545']== 1 or d['V202545']== 2): #d['V202024']== 1 or
             l['persona'] += obf("You like to argue about politics.", obfuscation_map) + "\n"
 
 
-        if d['liberalConservative'] is not None:
+        if not ignore_ideology and d['liberalConservative'] is not None:
                 l['persona'] += f'You consider yourself {obf(d["liberalConservative"], obfuscation_map)}.\n'
 
         problems = [d['problem1'],d['problem2'],d['problem3']]
         problems = [p for p in problems if p is not None and type(p) == str]
 
-        if len(problems)==1:
-            l['persona'] += f'You think the most important problem facing the country is {format_list([obf(p, obfuscation_map) for p in problems])}.\n'
-        elif len(problems)>1:
-            l['persona'] += f'You think the most important problems facing the country are {format_list([obf(p, obfuscation_map) for p in problems])}.\n'
+        if not ignore_problems:
+            if len(problems)==1:
+                l['persona'] += f'You think the most important problem facing the country is {format_list([obf(p, obfuscation_map) for p in problems])}.\n'
+            elif len(problems)>1:
+                l['persona'] += f'You think the most important problems facing the country are {format_list([obf(p, obfuscation_map) for p in problems])}.\n'
 
         l['importantProblems'] = problems
 
         l['gunsOwned'] = d['gunsOwned']
 
-        if d['gunsOwned'] > 0:
+        if not ignore_political_behaviour and d['gunsOwned'] > 0:
             l['persona'] += obf("You own guns.", obfuscation_map) + "\n"
 
 
-        if len(hobbies_liked)>0:
+        if not ignore_leisure and len(hobbies_liked)>0:
             l['persona'] += f'You like to watch {format_list([obf(h, obfuscation_map) for h in hobbies_liked])} on TV.\n'
 
         res.append(l)
@@ -802,6 +801,11 @@ def build_argparser() -> argparse.ArgumentParser:
     argparser.add_argument("--ignore_voted2020", action='store_true', default=False, help="Whether to ignore voted2020 info")
     argparser.add_argument("--ignore_voted2020_year", action='store_true', default=False, help="Whether to omit 'in 2020' from the voted2020 sentence (candidate/no-vote is still stated)")
     argparser.add_argument("--ignore_age", action='store_true', default=False, help="Whether to omit the age sentence from the persona text")
+    argparser.add_argument("--ignore_ideology", action='store_true', default=False, help="Omit the liberal/conservative self-placement sentence")
+    argparser.add_argument("--ignore_political_behaviour", action='store_true', default=False, help="Omit political-behaviour sentences: violence justification, gun ownership, arguing about politics, never talking about politics")
+    argparser.add_argument("--ignore_leisure", action='store_true', default=False, help="Omit leisure sentences: fishing/hunting and TV programs")
+    argparser.add_argument("--ignore_problems", action='store_true', default=False, help="Omit the most-important-problems sentence")
+    argparser.add_argument("--ignore_religion", action='store_true', default=False, help="Omit the religion sentence (robustness check: religion is near-diagnostic of party in the unobfuscated condition)")
     argparser.add_argument("--ignore_extend_with_ai", action='store_true', default=False, help="Whether to skip extending personas with AI-generated occupation/hobbies")
     argparser.add_argument("--ignore_bio", action='store_true', default=False, help="Whether to skip generating a biography for the persona entirely")
     # Here, the parameters control what is added to the public bio of the agent. The persona generation always uses all info.
@@ -829,6 +833,11 @@ def generate_personas_cli(args: argparse.Namespace) -> dict:
                             ignore_voted2020=args.ignore_voted2020,
                             ignore_voted2020_year=args.ignore_voted2020_year,
                             ignore_age=args.ignore_age,
+                            ignore_ideology=args.ignore_ideology,
+                            ignore_political_behaviour=args.ignore_political_behaviour,
+                            ignore_leisure=args.ignore_leisure,
+                            ignore_problems=args.ignore_problems,
+                            ignore_religion=args.ignore_religion,
                             obfuscation=args.obfuscation,
                             seed=args.seed)
 
@@ -839,6 +848,11 @@ def generate_personas_cli(args: argparse.Namespace) -> dict:
         f"{'noVoted2020_' if args.ignore_voted2020 else ''}"
         f"{'noVoted2020Year_' if args.ignore_voted2020_year else ''}"
         f"{'noAge_' if args.ignore_age else ''}"
+        f"{'noIdeology_' if args.ignore_ideology else ''}"
+        f"{'noPoliticalBehaviour_' if args.ignore_political_behaviour else ''}"
+        f"{'noLeisure_' if args.ignore_leisure else ''}"
+        f"{'noProblems_' if args.ignore_problems else ''}"
+        f"{'noReligion_' if args.ignore_religion else ''}"
         f"{'noExtendWithAi_' if args.ignore_extend_with_ai else ''}"
         f"{'noBio_' if args.ignore_bio else ''}"
         f"{'noBioLoveHate_' if args.ignore_bio_love_hate else ''}"
@@ -875,6 +889,11 @@ def generate_personas_cli(args: argparse.Namespace) -> dict:
         f"{'noVoted2020_' if args.ignore_voted2020 else ''}"
         f"{'noVoted2020Year_' if args.ignore_voted2020_year else ''}"
         f"{'noAge_' if args.ignore_age else ''}"
+        f"{'noIdeology_' if args.ignore_ideology else ''}"
+        f"{'noPoliticalBehaviour_' if args.ignore_political_behaviour else ''}"
+        f"{'noLeisure_' if args.ignore_leisure else ''}"
+        f"{'noProblems_' if args.ignore_problems else ''}"
+        f"{'noReligion_' if args.ignore_religion else ''}"
         f"{'noExtendWithAi_' if args.ignore_extend_with_ai else ''}"
         f"{'noBio_' if args.ignore_bio else ''}"
         f"{'noBioLoveHate_' if args.ignore_bio_love_hate else ''}"

@@ -97,6 +97,7 @@ class Agent():
         
         result = {
             "identifier": self.identifier,
+            "persona_index": self.persona.get("persona_index") if self.persona else None,
             "followers": self.followers,
             "used_tokens_input": self.used_tokens_input,
             "used_tokens_output": self.used_tokens_output,

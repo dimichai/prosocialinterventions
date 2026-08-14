@@ -205,7 +205,7 @@ def ask_question(
                 return "dont_know", parsed.explanation
             return choice == "yes", parsed.explanation
         except LengthFinishReasonError:
-            print(f"    [warn] truncated response on attempt {attempt + 1} for question: {question!r}")
+            print(f"    [warn] [id={persona.get('persona_index')}] truncated response on attempt {attempt + 1} for question: {question!r}")
 
     return None, "ERROR: response truncated (length limit reached) after retry"
 
@@ -237,7 +237,7 @@ def ask_feeling_thermometer_single(
             parsed = response.choices[0].message.parsed
             return parsed.recognized, parsed.rating
         except LengthFinishReasonError:
-            print(f"    [warn] truncated thermometer response on attempt {attempt + 1} for {label!r}")
+            print(f"    [warn] [id={persona.get('persona_index')}] truncated thermometer response on attempt {attempt + 1} for {label!r}")
 
     return None, None
 
@@ -253,7 +253,7 @@ def ask_feeling_thermometer(
         recognized, rating = ask_feeling_thermometer_single(client, persona, label, model, group_context)
         row[f"{role}_therm_recognized"] = recognized
         row[f"{role}_therm_rating"]     = rating
-        print(f"    [{role}_therm] recognized={recognized!r} rating={rating!r}")
+        print(f"    [id={persona.get('persona_index')}] [{role}_therm] recognized={recognized!r} rating={rating!r}")
     return row
 
 
@@ -294,10 +294,11 @@ def interview_personas(
     results = []
 
     for i, persona in enumerate(personas):
-        print(f"[{i + 1}/{len(personas)}] Interviewing persona…")
+        persona_id = persona.get("persona_index", i)
+        print(f"[{i + 1}/{len(personas)}] Interviewing persona (id={persona_id})…")
 
         row = {
-            "persona_index": i,
+            "persona_index": persona_id,
             "persona_text":  persona.get("persona", ""),
             "party":         persona.get("party", ""),
             "age":           persona.get("age", ""),
@@ -321,7 +322,7 @@ def interview_personas(
             )
             row[f"{key}_answer"]      = answer          # True / False / "dont_know"
             row[f"{key}_explanation"] = explanation
-            print(f"    [{key}] {answer!r} — {explanation}")
+            print(f"    [id={persona_id}] [{key}] {answer!r} — {explanation}")
 
         row.update(ask_feeling_thermometer(client, persona, thermometer_targets, model, group_context))
 

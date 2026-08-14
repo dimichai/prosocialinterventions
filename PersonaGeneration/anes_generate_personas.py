@@ -520,8 +520,9 @@ def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=Fal
     #Here we produce the persona description
     
     res = []
-    for d in random_dicts:
+    for persona_index, d in enumerate(random_dicts):
         l = {}
+        l['persona_index'] = persona_index
         #media sources
         media = ['V201634a','V201634b','V201634c','V201634d','V201634e','V201634f','V201634g','V201634h','V201634i','V201634j','V201634k','V201634m','V201634n','V201634p']
         l['media'] = [m for m in media if d[m]==1]

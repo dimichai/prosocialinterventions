@@ -192,10 +192,11 @@ def interview_personas(
     results = []
 
     for i, persona in enumerate(personas):
-        print(f"[{i + 1}/{len(personas)}] Interviewing persona…")
+        persona_id = persona.get("persona_index", i)
+        print(f"[{i + 1}/{len(personas)}] Interviewing persona (id={persona_id})…")
 
         row = {
-            "persona_index": i,
+            "persona_index": persona_id,
             "persona_text":  persona.get("persona", ""),
             "party":         persona.get("party", ""),
             "age":           persona.get("age", ""),

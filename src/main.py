@@ -129,7 +129,8 @@ def log_action(user, action):
     Log the action taken by the user to the console.
     """
 
-    log_msg = f"User {user.identifier} chose action "
+    persona_index = user.persona.get("persona_index") if user.persona else None
+    log_msg = f"User {user.identifier} (persona_id={persona_index}) chose action "
 
     if action.option == 1:
         log_msg += "1, repost."

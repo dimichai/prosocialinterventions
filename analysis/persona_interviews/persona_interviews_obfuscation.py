@@ -253,6 +253,7 @@ def ask_feeling_thermometer(
         recognized, rating = ask_feeling_thermometer_single(client, persona, label, model, group_context)
         row[f"{role}_therm_recognized"] = recognized
         row[f"{role}_therm_rating"]     = rating
+        print(f"    [{role}_therm] recognized={recognized!r} rating={rating!r}")
     return row
 
 
@@ -320,6 +321,7 @@ def interview_personas(
             )
             row[f"{key}_answer"]      = answer          # True / False / "dont_know"
             row[f"{key}_explanation"] = explanation
+            print(f"    [{key}] {answer!r} — {explanation}")
 
         row.update(ask_feeling_thermometer(client, persona, thermometer_targets, model, group_context))
 
@@ -539,6 +541,17 @@ def run_interview_for_setting(
             interview_wandb.upload_results_artifact(df, name=f"interview-results-{obfuscation}-seed{seed}")
             metrics = interview_wandb.persona_population_metrics(df)
             metrics.update(interview_wandb.result_metrics(df, questions, thermometer_targets))
+            # In addition to the downloadable CSV artifact above, log the same
+            # per-persona rows (individual answers + explanations) as a wandb
+            # Table, so they're browsable/sortable/filterable in the run's UI
+            # without downloading anything. wandb.Table requires one consistent
+            # type per column, but `{key}_answer` columns mix True/False/
+            # "dont_know"/None, so stringify a copy just for the table view (the
+            # CSV artifact above keeps the original values for programmatic use).
+            table_df = df.copy()
+            answer_cols = [c for c in table_df.columns if c.endswith("_answer")]
+            table_df[answer_cols] = table_df[answer_cols].astype(str)
+            metrics["interview_results_table"] = wandb.Table(dataframe=table_df)
             wandb.log(metrics)
             run_ids.append(run.id)
             wandb.finish()

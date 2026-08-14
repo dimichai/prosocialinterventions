@@ -21,7 +21,11 @@ def pct_yes_no_dontknow(answers: pd.Series) -> tuple[float, float, int]:
     (pct_yes, pct_dont_know, n_answered) for one run."""
     is_dont_know = answers.eq("dont_know")
     n_total = int(answers.notna().sum())
-    yes_no = answers[~is_dont_know].map({True: 1.0, False: 0.0})
+    # Columns mixing bool with the "dont_know" string can't be inferred as bool
+    # dtype by pandas, so a CSV round-trip (upload_results_artifact ->
+    # download_results_dataframe) turns True/False into the strings "True"/"False"
+    # rather than leaving them as real Python bools — map both forms to be safe.
+    yes_no = answers[~is_dont_know].map({True: 1.0, False: 0.0, "True": 1.0, "False": 0.0})
     n_answered = int(yes_no.notna().sum())
     pct_yes = yes_no.mean() if n_answered else float("nan")
     pct_dont_know = (is_dont_know.sum() / n_total) if n_total else float("nan")

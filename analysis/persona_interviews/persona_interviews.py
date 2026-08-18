@@ -75,7 +75,7 @@ class ThermometerAnswer(BaseModel):
 
 def _system_message(persona: dict) -> str:
     return (
-        "You are a user of the X social media platform. "
+        "You are a user of a social media platform. "
         "This is a platform where users share opinions and thoughts on topics of interest "
         "in the form of posts.\n\n"
         "Here is a description of your persona:\n"

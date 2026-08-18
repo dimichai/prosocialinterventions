@@ -69,7 +69,7 @@ def obf(value, mapping):
 
 
 # This code fetches lines from the ANES, and returns as readable dict
-def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=False, ignore_voted2020=False, ignore_voted2020_year=False, ignore_age=False, ignore_ideology=False, ignore_political_behaviour=False, ignore_leisure=False, ignore_problems=False, ignore_religion=False, obfuscation='none', seed=42):
+def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=False, ignore_voted2020=False, ignore_voted2020_year=False, ignore_age=False, ignore_ideology=False, ignore_political_behaviour=False, ignore_leisure=False, ignore_problems=False, ignore_religion=False, ignore_state=False, obfuscation='none', seed=42):
 
     obfuscation_map = load_obfuscation_map(obfuscation)
 
@@ -628,7 +628,7 @@ def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=Fal
         l['race'] = d['race']
         l['sexOrientation'] = d['sexOrientation']
 
-        if d['state'] is not None:
+        if not ignore_state and d['state'] is not None:
             l['persona'] += f"You are from {obf(d['state'], obfuscation_map)}.\n"
         if d['education'] is not None:
             l['persona'] += f"Education: {obf(d['education'], obfuscation_map)}.\n"
@@ -807,6 +807,8 @@ def build_argparser() -> argparse.ArgumentParser:
     argparser.add_argument("--ignore_leisure", action='store_true', default=False, help="Omit leisure sentences: fishing/hunting and TV programs")
     argparser.add_argument("--ignore_problems", action='store_true', default=False, help="Omit the most-important-problems sentence")
     argparser.add_argument("--ignore_religion", action='store_true', default=False, help="Omit the religion sentence (robustness check: religion is near-diagnostic of party in the unobfuscated condition)")
+    argparser.add_argument("--ignore_state", action='store_true', default=False, help="Omit the state-of-residence sentence")
+    argparser.add_argument("--minimal_persona", action='store_true', default=False, help="Shorthand that strips the persona down to core demographics: omits state, important problems, political-behaviour traits (guns, political violence, arguing/never talking about politics), and leisure sentences (fishing/hunting, TV programs). Equivalent to combining --ignore_state --ignore_problems --ignore_political_behaviour --ignore_leisure")
     argparser.add_argument("--ignore_extend_with_ai", action='store_true', default=False, help="Whether to skip extending personas with AI-generated occupation/hobbies")
     argparser.add_argument("--ignore_bio", action='store_true', default=False, help="Whether to skip generating a biography for the persona entirely")
     # Here, the parameters control what is added to the public bio of the agent. The persona generation always uses all info.
@@ -828,6 +830,13 @@ def generate_personas_cli(args: argparse.Namespace) -> dict:
     #Example usage
     # print(return_persona_string())
 
+    # --minimal_persona is a shorthand that forces these sentence categories off,
+    # regardless of whether their individual --ignore_* flags were also passed.
+    ignore_state = args.ignore_state or args.minimal_persona
+    ignore_problems = args.ignore_problems or args.minimal_persona
+    ignore_political_behaviour = args.ignore_political_behaviour or args.minimal_persona
+    ignore_leisure = args.ignore_leisure or args.minimal_persona
+
     personas = get_anes_rows(args.num_personas,
                             ignore_love_hate=args.ignore_love_hate,
                             ignore_party_identity=args.ignore_party_identity,
@@ -835,10 +844,11 @@ def generate_personas_cli(args: argparse.Namespace) -> dict:
                             ignore_voted2020_year=args.ignore_voted2020_year,
                             ignore_age=args.ignore_age,
                             ignore_ideology=args.ignore_ideology,
-                            ignore_political_behaviour=args.ignore_political_behaviour,
-                            ignore_leisure=args.ignore_leisure,
-                            ignore_problems=args.ignore_problems,
+                            ignore_political_behaviour=ignore_political_behaviour,
+                            ignore_leisure=ignore_leisure,
+                            ignore_problems=ignore_problems,
                             ignore_religion=args.ignore_religion,
+                            ignore_state=ignore_state,
                             obfuscation=args.obfuscation,
                             seed=args.seed)
 
@@ -850,10 +860,12 @@ def generate_personas_cli(args: argparse.Namespace) -> dict:
         f"{'noVoted2020Year_' if args.ignore_voted2020_year else ''}"
         f"{'noAge_' if args.ignore_age else ''}"
         f"{'noIdeology_' if args.ignore_ideology else ''}"
-        f"{'noPoliticalBehaviour_' if args.ignore_political_behaviour else ''}"
-        f"{'noLeisure_' if args.ignore_leisure else ''}"
-        f"{'noProblems_' if args.ignore_problems else ''}"
+        f"{'noPoliticalBehaviour_' if ignore_political_behaviour else ''}"
+        f"{'noLeisure_' if ignore_leisure else ''}"
+        f"{'noProblems_' if ignore_problems else ''}"
         f"{'noReligion_' if args.ignore_religion else ''}"
+        f"{'noState_' if ignore_state else ''}"
+        f"{'minimalPersona_' if args.minimal_persona else ''}"
         f"{'noExtendWithAi_' if args.ignore_extend_with_ai else ''}"
         f"{'noBio_' if args.ignore_bio else ''}"
         f"{'noBioLoveHate_' if args.ignore_bio_love_hate else ''}"
@@ -891,10 +903,12 @@ def generate_personas_cli(args: argparse.Namespace) -> dict:
         f"{'noVoted2020Year_' if args.ignore_voted2020_year else ''}"
         f"{'noAge_' if args.ignore_age else ''}"
         f"{'noIdeology_' if args.ignore_ideology else ''}"
-        f"{'noPoliticalBehaviour_' if args.ignore_political_behaviour else ''}"
-        f"{'noLeisure_' if args.ignore_leisure else ''}"
-        f"{'noProblems_' if args.ignore_problems else ''}"
+        f"{'noPoliticalBehaviour_' if ignore_political_behaviour else ''}"
+        f"{'noLeisure_' if ignore_leisure else ''}"
+        f"{'noProblems_' if ignore_problems else ''}"
         f"{'noReligion_' if args.ignore_religion else ''}"
+        f"{'noState_' if ignore_state else ''}"
+        f"{'minimalPersona_' if args.minimal_persona else ''}"
         f"{'noExtendWithAi_' if args.ignore_extend_with_ai else ''}"
         f"{'noBio_' if args.ignore_bio else ''}"
         f"{'noBioLoveHate_' if args.ignore_bio_love_hate else ''}"

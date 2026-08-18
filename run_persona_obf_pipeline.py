@@ -52,6 +52,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ignore_leisure", action='store_true', default=False, help="Omit leisure sentences: fishing/hunting and TV programs")
     parser.add_argument("--ignore_problems", action='store_true', default=False, help="Omit the most-important-problems sentence")
     parser.add_argument("--ignore_religion", action='store_true', default=False, help="Omit the religion sentence (robustness check: religion is near-diagnostic of party in the unobfuscated condition)")
+    parser.add_argument("--ignore_state", action='store_true', default=False, help="Omit the state-of-residence sentence")
+    parser.add_argument("--minimal_persona", action='store_true', default=False, help="Shorthand that strips the persona down to core demographics: omits state, important problems, political-behaviour traits (guns, political violence, arguing/never talking about politics), and leisure sentences (fishing/hunting, TV programs). Equivalent to combining --ignore_state --ignore_problems --ignore_political_behaviour --ignore_leisure")
     parser.add_argument("--ignore_extend_with_ai", action='store_true', default=False, help="Whether to skip extending personas with AI-generated occupation/hobbies")
     parser.add_argument("--ignore_bio", action='store_true', default=False, help="Whether to skip generating a biography for the persona entirely")
     parser.add_argument("--gen_seed", type=int, default=42, help="Random seed for persona sampling and AI extension choices")
@@ -85,7 +87,7 @@ def main() -> None:
     gen_arg_names = [
         "num_personas", "ignore_love_hate", "ignore_party_identity", "ignore_voted2020",
         "ignore_voted2020_year", "ignore_age", "ignore_ideology", "ignore_political_behaviour",
-        "ignore_leisure", "ignore_problems", "ignore_religion",
+        "ignore_leisure", "ignore_problems", "ignore_religion", "ignore_state", "minimal_persona",
         "ignore_extend_with_ai", "ignore_bio",
         "ignore_bio_love_hate", "ignore_bio_party_identity", "ignore_bio_voted2020",
     ]

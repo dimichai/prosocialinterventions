@@ -130,20 +130,28 @@ POPULATION_METRIC_INFO = {
 }
 
 
-def aggregate_population_metrics(raw_dfs: list[pd.DataFrame]) -> dict[str, float]:
-    """Mean of interview_wandb.persona_population_metrics across the seeds within
-    one obfuscation condition — the same persona-attribute distribution that gets
-    logged to wandb under the "personas/" prefix at run time, recomputed here from
-    the downloaded raw per-persona results so it can be printed alongside the
-    question-answer tables."""
+def aggregate_population_metrics(raw_dfs: list[pd.DataFrame]) -> dict[str, tuple[float, float]]:
+    """Mean and 95%-CI half-width (`1.96 * std / sqrt(n_runs)`, across the seeds
+    within one obfuscation condition) of interview_wandb.persona_population_metrics
+    — the same persona-attribute distribution that gets logged to wandb under the
+    "personas/" prefix at run time, recomputed here from the downloaded raw
+    per-persona results so it can be printed alongside the question-answer
+    tables."""
     per_run = [interview_wandb.persona_population_metrics(df) for df in raw_dfs]
     keys = set().union(*[m.keys() for m in per_run])
-    return {key: pd.Series([m.get(key, float("nan")) for m in per_run], dtype=float).mean() for key in keys}
+    result = {}
+    for key in keys:
+        values = pd.Series([m.get(key, float("nan")) for m in per_run], dtype=float)
+        n = int(values.notna().sum())
+        mean = values.mean()
+        err = 1.96 * values.std() / math.sqrt(n) if n > 1 else float("nan")
+        result[key] = (mean, err)
+    return result
 
 
 def fetch_condition_dfs(
     batch_id: str, wandb_project: str = interview_wandb.WANDB_PROJECT
-) -> tuple[dict[str, pd.DataFrame], dict[str, dict[str, float]]]:
+) -> tuple[dict[str, pd.DataFrame], dict[str, dict[str, tuple[float, float]]]]:
     """Fetch every wandb run sharing `batch_id` (one run per obfuscation x seed,
     written by run_persona_obf_pipeline.py / persona_interviews_obfuscation.py),
     download each run's raw per-persona results, and aggregate across seeds within
@@ -182,10 +190,11 @@ def fetch_condition_dfs(
     return dfs, population
 
 
-def print_population_table(population: dict[str, dict[str, float]]) -> None:
+def print_population_table(population: dict[str, dict[str, tuple[float, float]]]) -> None:
     """Persona population statistics per condition (rows = obfuscation condition),
     i.e. the attributes of the personas being interviewed, before any LLM answers —
-    the same stats logged to wandb under the "personas/" prefix."""
+    the same stats logged to wandb under the "personas/" prefix. Each cell is
+    mean ± 95%-CI half-width across seeds (see `aggregate_population_metrics`)."""
     present_metrics = [m for m in POPULATION_METRIC_INFO if any(m in stats for stats in population.values())]
     if not present_metrics:
         print("No persona population stats found — skipping.")
@@ -198,8 +207,8 @@ def print_population_table(population: dict[str, dict[str, float]]) -> None:
         for m in present_metrics:
             header = POPULATION_METRIC_INFO[m][0]
             fmt = POPULATION_METRIC_INFO[m][1]
-            v = stats.get(m)
-            row[header] = fmt.format(v) if v is not None and pd.notna(v) else "n/a"
+            v, err = stats.get(m, (float("nan"), float("nan")))
+            row[header] = _fmt_ci(v, err, fmt)
         rows[label] = row
 
     table = pd.DataFrame.from_dict(rows, orient="index", columns=headers)
@@ -219,7 +228,9 @@ def print_question_tables(
 ) -> None:
     """One table per question, rows = obfuscation condition, columns = party
     identity — lines up every condition's answer to the same question side by
-    side, for every party, instead of splitting them across per-condition blocks."""
+    side, for every party, instead of splitting them across per-condition blocks.
+    Cells show mean ± 95%-CI half-width (the same CI drawn as error bars in the
+    plots, see `_lookup`)."""
     for key in keys:
         rows = {}
         for label, df in dfs.items():
@@ -228,14 +239,14 @@ def print_question_tables(
                 continue
             row = {}
             for party in all_parties:
-                r = subset[subset["party"] == party]
-                if r.empty or pd.isna(r.iloc[0]["pct_yes_mean"]):
-                    row[party] = "n/a"
-                    continue
-                rec = r.iloc[0]
-                cell = f"{rec['pct_yes_mean'] * 100:.1f}%"
-                if key in trait_keys and pd.notna(rec["pct_dont_know_mean"]):
-                    cell += f" (dk {rec['pct_dont_know_mean'] * 100:.1f}%)"
+                v, err = _lookup(df, "question", key, party, "pct_yes_mean", "pct_yes_std")
+                cell = _fmt_ci(v * 100 if pd.notna(v) else v, err * 100 if pd.notna(err) else err, "{:.1f}%")
+                if key in trait_keys and pd.notna(v):
+                    dk_v, dk_err = _lookup(df, "question", key, party, "pct_dont_know_mean", "pct_dont_know_std")
+                    dk_cell = _fmt_ci(dk_v * 100 if pd.notna(dk_v) else dk_v,
+                                       dk_err * 100 if pd.notna(dk_err) else dk_err, "{:.1f}%")
+                    if dk_cell != "n/a":
+                        cell += f" (dk {dk_cell})"
                 row[party] = cell
             rows[label] = row
 
@@ -263,6 +274,34 @@ def _lookup(df: pd.DataFrame, metric: str, key: str, party: str, value_col: str,
         return float("nan"), float("nan")
     err = 1.96 * std / math.sqrt(n_runs) if pd.notna(std) else float("nan")
     return float(value), float(err)
+
+
+def _fmt_ci(value: float, err: float, fmt: str = "{:.1f}") -> str:
+    """Format a (value, 95%-CI half-width) pair as `mean ± CI` — the single
+    style shared by every printed table in this script (population stats,
+    question/trait tables, thermometer, affective polarization). Falls back to
+    a bare mean if no CI is available, or "n/a" if the value itself is missing."""
+    if value is None or pd.isna(value):
+        return "n/a"
+    s = fmt.format(value)
+    if err is not None and pd.notna(err):
+        s += f" ± {fmt.format(err)}"
+    return s
+
+
+def _print_comparison_table(title: str, labels: list[str], columns: list[str], value_fn) -> None:
+    """Print one table: rows = obfuscation condition (`labels`), columns =
+    `columns` (e.g. party), cell = `_fmt_ci(*value_fn(label, column))`. Mirrors
+    the row/column layout `print_question_tables` uses, so every printed
+    result set — questions, thermometer, affective polarization — reads the
+    same way instead of some being one table and others per-condition blocks."""
+    rows = {}
+    for label in labels:
+        row = {col: _fmt_ci(*value_fn(label, col)) for col in columns}
+        rows[label] = row
+    table = pd.DataFrame.from_dict(rows, orient="index", columns=columns)
+    print(f"\n  {title}")
+    print(table.to_string().replace("\n", "\n  "))
 
 
 def _draw_table_panel(
@@ -433,13 +472,12 @@ def plot_thermometer_comparison(
     outer = fig.add_gridspec(nrows, ncols, hspace=0.25, wspace=0.4, left=0.08, right=0.97,
                               top=TOP_PAD, bottom=0.04)
 
+    def therm_value_fn(role):
+        return lambda label, party: _lookup(dfs[label], "thermometer", role, party, "rating_mean", "rating_std")
+
     for idx, (role, person_label) in enumerate(therm_keys):
         r, c = divmod(idx, ncols)
-
-        def value_fn(label, party, _role=role):
-            return _lookup(dfs[label], "thermometer", _role, party, "rating_mean", "rating_std")
-
-        _draw_table_panel(fig, outer[r, c], labels, all_parties, condition_colors, value_fn,
+        _draw_table_panel(fig, outer[r, c], labels, all_parties, condition_colors, therm_value_fn(role),
                            (0, 100), f"Feeling thermometer: {person_label}\n(obfuscated per condition)", "{:.0f}")
 
     fig.text(0.01, 0.5, "Mean rating (0-100)", va="center", rotation="vertical", fontsize=10, color="#555555")
@@ -448,18 +486,11 @@ def plot_thermometer_comparison(
     plt.close(fig)
     print(f"Saved to {output_path}")
 
-    for label, df in dfs.items():
-        print(f"\n{'='*60}")
-        print(f"  {label}")
-        print(f"{'='*60}")
-        for role, person_label in therm_keys:
-            print(f"\n  Feeling thermometer: {person_label}")
-            for party in all_parties:
-                row = df[(df["metric"] == "thermometer") & (df["key"] == role) & (df["party"] == party)]
-                if row.empty or pd.isna(row.iloc[0]["rating_mean"]):
-                    continue
-                r = row.iloc[0]
-                print(f"    {party:<30} {r['rating_mean']:5.1f}  (avg_n={r['avg_n']:.1f}, n_runs={int(r['n_runs'])})")
+    print(f"\n{'='*60}")
+    print("  Feeling thermometer (rows = obfuscation condition, columns = party)")
+    print(f"{'='*60}")
+    for role, person_label in therm_keys:
+        _print_comparison_table(f"Feeling thermometer: {person_label}", labels, all_parties, therm_value_fn(role))
 
 
 def plot_affective_polarization_comparison(
@@ -504,16 +535,11 @@ def plot_affective_polarization_comparison(
     plt.close(fig)
     print(f"Saved to {output_path}")
 
-    for label, df in dfs.items():
-        print(f"\n{'='*60}")
-        print(f"  {label}")
-        print(f"{'='*60}")
-        print("\n  Affective polarization (own-party minus opposing-party rating)")
-        for party in parties:
-            v, _ = polarization(df, party)
-            if math.isnan(v):
-                continue
-            print(f"    {party:<30} {v:6.1f}")
+    print(f"\n{'='*60}")
+    print("  Affective polarization (rows = obfuscation condition, columns = party)")
+    print(f"{'='*60}")
+    _print_comparison_table("Affective polarization (own-party minus opposing-party rating)",
+                             labels, parties, value_fn)
 
 
 def parse_args() -> argparse.Namespace:

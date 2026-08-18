@@ -1,4 +1,4 @@
-AGENT_SYSTEM_MESSAGE = """You are a user of the X social media platform.
+AGENT_SYSTEM_MESSAGE = """You are a user of a social media platform.
 This is a platform where users share opinions and thoughts on topics of interest in the form of posts.
 Your main goal is to repost others' posts and you are also able to share your own posts.
 {persona_section}"""
@@ -17,7 +17,7 @@ User ID: {user_id}
 {follower_count_line}{bio_line}
 You also see that the user has recently posted or reposted the following messages:
 
-{recent_posts}Based on your beliefs, interests and personality, would you like to follow this user?
+{recent_posts}. Based on your beliefs, interests and personality, would you like to follow this user?
 Reply with 'yes' or 'no'. Also provide a short explanation for your choice."""
 
 PERFORM_ACTION_INSTRUCTIONS = """You are presented with the following options. You have to choose exactly one option based on your persona.

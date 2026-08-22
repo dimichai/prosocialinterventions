@@ -11,7 +11,7 @@ import dotenv
 import pandas as pd
 import wandb
 from openai import OpenAI, LengthFinishReasonError
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 sys.path.insert(0, os.path.dirname(__file__))
@@ -58,6 +58,20 @@ def get_party_labels(personas_setting: str) -> tuple[str, str]:
     """Return (democrats_label, republicans_label) matching the obfuscation mode encoded in personas_setting."""
     democrats_label, republicans_label = _lookup_obfuscated_terms(personas_setting, ["Democrats", "Republicans"])
     return democrats_label, republicans_label
+
+
+# GPT-5-family models spend part of their completion budget on hidden reasoning
+# tokens before writing the visible answer, so a max_tokens value that's ample
+# for gpt-4o-mini-style models can still truncate them mid-JSON.
+REASONING_MODEL_PREFIXES = ("gpt-5", "openai/gpt-5", "o1", "o3", "o4")
+DEFAULT_MAX_TOKENS = 16384
+REASONING_MODEL_MAX_TOKENS = 32768
+
+
+def _max_tokens_for_model(model: str) -> int:
+    if model.lower().startswith(REASONING_MODEL_PREFIXES):
+        return REASONING_MODEL_MAX_TOKENS
+    return DEFAULT_MAX_TOKENS
 
 
 THERMOMETER_INTRO = (
@@ -196,7 +210,7 @@ def ask_question(
                     {"role": "user", "content": f"{question}\n\n{instruction}"},
                 ],
                 response_format=response_format,
-                max_tokens=16384,
+                max_tokens=_max_tokens_for_model(model),
                 temperature=1.0,
             )
             parsed = response.choices[0].message.parsed
@@ -204,7 +218,10 @@ def ask_question(
             if choice == "dont_know":
                 return "dont_know", parsed.explanation
             return choice == "yes", parsed.explanation
-        except LengthFinishReasonError:
+        except (LengthFinishReasonError, ValidationError):
+            # Some OpenRouter providers truncate the completion without reporting
+            # finish_reason="length", so the SDK doesn't raise LengthFinishReasonError
+            # and instead fails to parse the incomplete JSON (ValidationError).
             print(f"    [warn] [id={persona.get('persona_index')}] truncated response on attempt {attempt + 1} for question: {question!r}")
 
     return None, "ERROR: response truncated (length limit reached) after retry"
@@ -231,12 +248,12 @@ def ask_feeling_thermometer_single(
                     {"role": "user", "content": prompt},
                 ],
                 response_format=ThermometerAnswer,
-                max_tokens=16384,
+                max_tokens=_max_tokens_for_model(model),
                 temperature=1.0,
             )
             parsed = response.choices[0].message.parsed
             return parsed.recognized, parsed.rating
-        except LengthFinishReasonError:
+        except (LengthFinishReasonError, ValidationError):
             print(f"    [warn] [id={persona.get('persona_index')}] truncated thermometer response on attempt {attempt + 1} for {label!r}")
 
     return None, None

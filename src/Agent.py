@@ -20,12 +20,13 @@ class BooleanAction(BaseModel):
 
 class Agent():
 
-    def __init__(self, model: str, persona: dict = None, no_personas: bool = False, no_bio: bool = False, no_news_category: bool = False):
+    def __init__(self, model: str, persona: dict = None, no_personas: bool = False, no_bio: bool = False, no_news_category: bool = False, group_context: str = ""):
 
         self.persona = persona
         self.no_personas = no_personas
         self.no_bio = no_bio
         self.no_news_category = no_news_category
+        self.group_context = group_context
 
         self.llm = None
         self.model = model
@@ -58,7 +59,10 @@ class Agent():
         """
 
         persona_section = "" if self.no_personas else f"\nHere is a description of your persona:\n{self.persona['persona']}"
-        return P.AGENT_SYSTEM_MESSAGE.format(persona_section=persona_section)
+        message = P.AGENT_SYSTEM_MESSAGE.format(persona_section=persona_section)
+        if self.group_context:
+            message += f"\n\n{self.group_context}"
+        return message
     
     def _add_bio(self):
 

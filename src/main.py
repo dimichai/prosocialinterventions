@@ -21,6 +21,8 @@ import networkx as nx
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from analysis.analyse_multiple import gini_coefficient, EI_index, correlations
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../PersonaGeneration'))
+from obfuscation_labels import infer_obfuscation, get_political_figure_labels, get_party_labels, build_group_context
 
 dotenv.load_dotenv()
 
@@ -196,9 +198,15 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
                 no_personas = False,
                 no_bio = False,
                 no_news_category = False,
-                wandb_project = "prosocial-interventions"):
+                wandb_project = "prosocial-interventions",
+                include_group_context = False):
 
     persona_label = get_persona_label(personas_file, no_personas, no_bio)
+    obfuscation = infer_obfuscation(personas_file)
+    group_context = (
+        build_group_context(*get_political_figure_labels(personas_file), *get_party_labels(personas_file))
+        if include_group_context else ""
+    )
 
     if log:
         wandb.init(project=wandb_project,
@@ -221,6 +229,9 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
                 "no_personas": no_personas,
                 "no_bio": no_bio,
                 "no_news_category": no_news_category,
+                "obfuscation": obfuscation,
+                "include_group_context": include_group_context,
+                "group_context": group_context,
             }
         )
 
@@ -261,7 +272,7 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
         )
 
     # Register users
-    [platform.register_user(Agent(model, user, no_personas=no_personas, no_bio=no_bio, no_news_category=no_news_category)) for user in selected_users]
+    [platform.register_user(Agent(model, user, no_personas=no_personas, no_bio=no_bio, no_news_category=no_news_category, group_context=group_context)) for user in selected_users]
     platform.set_client(client)
     
     for i in range(simulation_steps):
@@ -346,6 +357,11 @@ if __name__ == "__main__":
     argparser.add_argument('--no_bio', action='store_true', default=False, help="Omit the target user's bio when an agent decides whether to follow them")
     argparser.add_argument('--no_news_category', action='store_true', default=False, help="Omit the news category when an agent decides which news to share")
     argparser.add_argument("--wandb_project", type=str, default="prosocial-interventions", help="Wandb project to log the run to")
+    argparser.add_argument("--include_group_context", action="store_true", default=False,
+        help="Prepend a short paragraph to each persona's system message naming the two "
+             "rival political affiliations and their leader (mirrors the interview script's "
+             "--include_group_context). Applied regardless of obfuscation condition, including "
+             "'none', so it stays the only thing that's off by default rather than a confound.")
 
     args = argparser.parse_args()
 
@@ -371,5 +387,6 @@ if __name__ == "__main__":
         no_personas=args.no_personas,
         no_bio=args.no_bio,
         no_news_category=args.no_news_category,
-        wandb_project=args.wandb_project
+        wandb_project=args.wandb_project,
+        include_group_context=args.include_group_context
     )

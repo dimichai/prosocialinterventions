@@ -64,8 +64,8 @@ plt.rcParams.update({
 TRAIT_QUESTIONS = [
     ("intelligent",   "intelligent"),
     ("honest",        "honest"),
-    ("openminded",    "open-minded"),
     ("generous",      "generous"),
+    ("openminded",    "open-minded"),
     ("hypocritical",  "hypocritical"),
     ("selfish",       "selfish"),
     ("mean",          "mean"),
@@ -82,18 +82,19 @@ QUESTIONS = [
     *[(f"rep_{key}", f"Do you think Republicans are {trait}?") for key, trait in TRAIT_QUESTIONS],
 ]
 
-THERMOMETER_TARGETS = [
-    ("biden", "Biden"),
-    ("trump", "Trump"),
-    ("democrats", "Democrats"),
-    ("republicans", "Republicans"),
-]
-
-# Own-party / opposing-party thermometer roles (see THERMOMETER_TARGETS keys)
-# used to compute affective polarization for each partisan group.
+# Own-party / opposing-party thermometer roles (see the "thermometer" rows'
+# `key` column — biden/trump/democrats/republicans) used to compute affective
+# polarization for each partisan group.
 PARTY_THERM_ROLES = {
     "Democrat":   ("democrats", "republicans"),
     "Republican": ("republicans", "democrats"),
+}
+
+# Same idea as PARTY_THERM_ROLES, but keyed on each party's leader instead of
+# the party label itself — own-leader rating minus other-leader rating.
+LEADER_THERM_ROLES = {
+    "Democrat":   ("biden", "trump"),
+    "Republican": ("trump", "biden"),
 }
 
 # obfuscation (config value) -> comparison-plot display label, in a fixed display
@@ -245,8 +246,7 @@ def print_question_tables(
                     dk_v, dk_err = _lookup(df, "question", key, party, "pct_dont_know_mean", "pct_dont_know_std")
                     dk_cell = _fmt_ci(dk_v * 100 if pd.notna(dk_v) else dk_v,
                                        dk_err * 100 if pd.notna(dk_err) else dk_err, "{:.1f}%")
-                    if dk_cell != "n/a":
-                        cell += f" (dk {dk_cell})"
+                    cell += f" (dk {dk_cell})"
                 row[party] = cell
             rows[label] = row
 
@@ -280,24 +280,42 @@ def _fmt_ci(value: float, err: float, fmt: str = "{:.1f}") -> str:
     """Format a (value, 95%-CI half-width) pair as `mean ± CI` — the single
     style shared by every printed table in this script (population stats,
     question/trait tables, thermometer, affective polarization). Falls back to
-    a bare mean if no CI is available, or "n/a" if the value itself is missing."""
+    a bare mean if no CI is available, or "N/A" if the value itself is missing
+    — always this exact string, so every missing value in every table/chart
+    reads the same way."""
     if value is None or pd.isna(value):
-        return "n/a"
+        return "N/A"
     s = fmt.format(value)
     if err is not None and pd.notna(err):
         s += f" ± {fmt.format(err)}"
     return s
 
 
-def _print_comparison_table(title: str, labels: list[str], columns: list[str], value_fn) -> None:
+def _print_comparison_table(
+    title: str, labels: list[str], columns: list[str], value_fn,
+    secondary_fn=None, secondary_prefix: str = "dk", secondary_fmt: str = "{:.1%}",
+) -> None:
     """Print one table: rows = obfuscation condition (`labels`), columns =
     `columns` (e.g. party), cell = `_fmt_ci(*value_fn(label, column))`. Mirrors
     the row/column layout `print_question_tables` uses, so every printed
     result set — questions, thermometer, affective polarization — reads the
-    same way instead of some being one table and others per-condition blocks."""
+    same way instead of some being one table and others per-condition blocks.
+
+    `secondary_fn`, if given, appends a "(prefix v ± e)" suffix to every cell —
+    the same non-response rate (don't-know / not-recognized) that
+    `print_question_tables` folds into its trait cells, kept in this one table
+    rather than a separate one. Always appended, even when missing (as "N/A"),
+    so every cell in a column is annotated the same way."""
     rows = {}
     for label in labels:
-        row = {col: _fmt_ci(*value_fn(label, col)) for col in columns}
+        row = {}
+        for col in columns:
+            cell = _fmt_ci(*value_fn(label, col))
+            if secondary_fn is not None:
+                sv, se = secondary_fn(label, col)
+                sec_cell = _fmt_ci(sv, se, secondary_fmt)
+                cell += f" ({secondary_prefix} {sec_cell})"
+            row[col] = cell
         rows[label] = row
     table = pd.DataFrame.from_dict(rows, orient="index", columns=columns)
     print(f"\n  {title}")
@@ -314,6 +332,9 @@ def _draw_table_panel(
     xlim: tuple[float, float],
     title: str,
     value_fmt: str = "{:.0%}",
+    secondary_fn=None,
+    secondary_prefix: str = "dk",
+    secondary_fmt: str = "{:.0%}",
 ) -> None:
     """Draw one "table" panel inside `outer_spec`: rows = obfuscation condition
     (`labels`), columns = `columns` (e.g. party), each cell a single horizontal
@@ -321,6 +342,12 @@ def _draw_table_panel(
     is the panel title, row 1 the column (party) headers — both dedicated rows,
     rather than relying on matplotlib's floating axes-title padding, which
     overlaps neighboring rows once cells get short.
+
+    `secondary_fn`, if given, is a non-response rate — don't-know for yes/no
+    trait questions, not-recognized for thermometer targets — drawn as a small
+    muted label pinned to each cell's top-right corner (fixed axes-fraction
+    position, independent of the main bar's length) so it's always visible in
+    this same panel instead of needing a separate comparison chart.
     """
     n_datasets = len(labels)
     n_cols = len(columns)
@@ -373,8 +400,14 @@ def _draw_table_panel(
                         ax.text(v - err - offset, 0, value_fmt.format(v), va="center", ha="right",
                                 fontsize=6.5, color="#333333", clip_on=False)
             else:
-                ax.text((xlim[0] + xlim[1]) / 2, 0, "n/a", va="center", ha="center",
+                ax.text((xlim[0] + xlim[1]) / 2, 0, "N/A", va="center", ha="center",
                         fontsize=6.5, color="#999999")
+            if secondary_fn is not None:
+                sv, se = secondary_fn(label, column)
+                sv_text = "N/A" if (sv is None or (isinstance(sv, float) and math.isnan(sv))) else secondary_fmt.format(sv)
+                ax.text(0.98, 0.92, f"{secondary_prefix} {sv_text}",
+                        transform=ax.transAxes, ha="right", va="top",
+                        fontsize=5.5, color="#999999", clip_on=False)
             ax.set_xlim(*xlim)
             ax.set_ylim(-0.7, 0.7)
             ax.set_xticks([])
@@ -407,6 +440,7 @@ def plot_metric_comparison(
     value_label: str = "Fraction answering Yes",
     xlim: tuple[float, float] = (0, 1),
     value_fmt: str = "{:.0%}",
+    show_dont_know: bool = False,
 ) -> None:
     """Table of horizontal bars, one panel per question/target: within each panel,
     rows = obfuscation condition, columns = party, cell = a single horizontal bar
@@ -414,6 +448,10 @@ def plot_metric_comparison(
 
     Panels wrap onto multiple rows (ncols per row) so this scales from a
     handful of questions up to a full trait battery without one absurdly wide row.
+
+    `show_dont_know`, when set (trait questions only), draws each cell's
+    don't-know rate as a small label inside this same panel (see
+    `_draw_table_panel`) instead of plotting it as a separate comparison chart.
     """
     n_panels = len(keys)
     if n_panels == 0:
@@ -439,8 +477,14 @@ def plot_metric_comparison(
         def value_fn(label, party, _key=key):
             return _lookup(dfs[label], metric, _key, party, value_col, std_col)
 
+        secondary_fn = None
+        if show_dont_know:
+            def secondary_fn(label, party, _key=key):
+                return _lookup(dfs[label], metric, _key, party, "pct_dont_know_mean", "pct_dont_know_std")
+
         _draw_table_panel(fig, outer[r, c], labels, all_parties, condition_colors,
-                           value_fn, xlim, title, value_fmt)
+                           value_fn, xlim, title, value_fmt,
+                           secondary_fn=secondary_fn, secondary_prefix="dk")
 
     fig.text(0.01, 0.5, value_label, va="center", rotation="vertical", fontsize=10, color="#555555")
     fig.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
@@ -449,64 +493,16 @@ def plot_metric_comparison(
     print(f"Saved to {output_path}")
 
 
-def plot_thermometer_comparison(
-    dfs: dict[str, pd.DataFrame], all_parties: list[str], condition_colors: dict[str, str], output_path: str
-) -> None:
-    therm_keys = [(role, label) for role, label in THERMOMETER_TARGETS
-                  if all(((df["metric"] == "thermometer") & (df["key"] == role)).any() for df in dfs.values())]
-    if not therm_keys:
-        print("No feeling-thermometer rows found in the comparison CSVs — skipping thermometer comparison plot.")
-        return
-
-    labels      = list(dfs.keys())
-    n_questions = len(therm_keys)
-    n_datasets  = len(labels)
-    n_parties   = len(all_parties)
-
-    ncols = min(n_questions, MAX_GRID_COLS)
-    nrows = -(-n_questions // ncols)  # ceil division
-
-    panel_w = 1.1 * n_parties + 1.0
-    panel_h = 0.4 * (n_datasets + 1) + 0.9
-    fig = plt.figure(figsize=(panel_w * ncols, panel_h * nrows))
-    outer = fig.add_gridspec(nrows, ncols, hspace=0.25, wspace=0.4, left=0.08, right=0.97,
-                              top=TOP_PAD, bottom=0.04)
-
-    def therm_value_fn(role):
-        return lambda label, party: _lookup(dfs[label], "thermometer", role, party, "rating_mean", "rating_std")
-
-    for idx, (role, person_label) in enumerate(therm_keys):
-        r, c = divmod(idx, ncols)
-        _draw_table_panel(fig, outer[r, c], labels, all_parties, condition_colors, therm_value_fn(role),
-                           (0, 100), f"Feeling thermometer: {person_label}\n(obfuscated per condition)", "{:.0f}")
-
-    fig.text(0.01, 0.5, "Mean rating (0-100)", va="center", rotation="vertical", fontsize=10, color="#555555")
-    fig.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
-    fig.savefig(output_path.replace('.pdf', '.png'), dpi=300, bbox_inches='tight', facecolor='white')
-    plt.close(fig)
-    print(f"Saved to {output_path}")
-
-    print(f"\n{'='*60}")
-    print("  Feeling thermometer (rows = obfuscation condition, columns = party)")
-    print(f"{'='*60}")
-    for role, person_label in therm_keys:
-        _print_comparison_table(f"Feeling thermometer: {person_label}", labels, all_parties, therm_value_fn(role))
-
-
-def plot_affective_polarization_comparison(
-    dfs: dict[str, pd.DataFrame], condition_colors: dict[str, str], output_path: str
-) -> None:
-    labels  = list(dfs.keys())
-    parties = [p for p in PARTY_THERM_ROLES
-               if any((df["party"] == p).any() for df in dfs.values())]
-    if not parties:
-        print("No partisan respondents with party feeling-thermometer ratings found — skipping affective polarization plot.")
-        return
-
-    def polarization(df: pd.DataFrame, party: str) -> tuple[float, float]:
-        own_role, opp_role = PARTY_THERM_ROLES[party]
-        own_val, own_err = _lookup(df, "thermometer", own_role, party, "rating_mean", "rating_std")
-        opp_val, opp_err = _lookup(df, "thermometer", opp_role, party, "rating_mean", "rating_std")
+def _affective_polarization_fn(dfs: dict[str, pd.DataFrame], role_map: dict[str, tuple[str, str]]):
+    """Return a `value_fn(label, party) -> (value, error)` computing own-role
+    rating minus opposing-role rating for `party`, per `role_map` (see
+    PARTY_THERM_ROLES / LEADER_THERM_ROLES)."""
+    def value_fn(label, party):
+        if party not in role_map:
+            return float("nan"), float("nan")
+        own_role, opp_role = role_map[party]
+        own_val, own_err = _lookup(dfs[label], "thermometer", own_role, party, "rating_mean", "rating_std")
+        opp_val, opp_err = _lookup(dfs[label], "thermometer", opp_role, party, "rating_mean", "rating_std")
         if math.isnan(own_val) or math.isnan(opp_val):
             return float("nan"), float("nan")
         # Own/opposing ratings come from the same respondents, but per-run values
@@ -515,31 +511,113 @@ def plot_affective_polarization_comparison(
         own_err = own_err if not math.isnan(own_err) else 0.0
         opp_err = opp_err if not math.isnan(opp_err) else 0.0
         return own_val - opp_val, math.hypot(own_err, opp_err)
+    return value_fn
 
-    n_parties  = len(parties)
+
+def plot_thermometer_comparison(
+    dfs: dict[str, pd.DataFrame], all_parties: list[str], condition_colors: dict[str, str], output_path: str
+) -> None:
+    """Fixed 3-row x 2-column grid: row 0 is the Democratic party and its
+    leader (Biden), row 1 the Republican party and its leader (Trump), row 2
+    the affective-polarization summaries (party-based, then leader-based) —
+    every feeling-thermometer result in one chart, rather than a separate
+    affective-polarization figure."""
+    def therm_present(role: str) -> bool:
+        return all(((df["metric"] == "thermometer") & (df["key"] == role)).any() for df in dfs.values())
+
+    labels     = list(dfs.keys())
     n_datasets = len(labels)
+    n_parties  = len(all_parties)
 
-    def value_fn(label, party):
-        return polarization(dfs[label], party)
+    party_polar_parties  = [p for p in PARTY_THERM_ROLES
+                             if any((df["party"] == p).any() for df in dfs.values())]
+    leader_polar_parties = [p for p in LEADER_THERM_ROLES
+                             if any((df["party"] == p).any() for df in dfs.values())]
+    party_polar_fn  = _affective_polarization_fn(dfs, PARTY_THERM_ROLES)
+    leader_polar_fn = _affective_polarization_fn(dfs, LEADER_THERM_ROLES)
+
+    def therm_value_fn(role):
+        return lambda label, party: _lookup(dfs[label], "thermometer", role, party, "rating_mean", "rating_std")
+
+    def therm_not_recognized_fn(role):
+        def fn(label, party):
+            rec, err = _lookup(dfs[label], "thermometer", role, party, "pct_recognized_mean", "pct_recognized_std")
+            if pd.isna(rec):
+                return float("nan"), float("nan")
+            return 1.0 - rec, err
+        return fn
+
+    # (panel kind, role, title) per grid cell; "role" is a thermometer key for
+    # "therm" panels and unused (None) for the polarization panels.
+    grid = [
+        [("therm", "democrats", "Democrats"), ("therm", "biden", "Biden")],
+        [("therm", "republicans", "Republicans"), ("therm", "trump", "Trump")],
+        [("polar_party", None, "Affective polarization\n(party)"),
+         ("polar_leader", None, "Affective polarization\n(leader)")],
+    ]
+    nrows, ncols = 3, 2
 
     panel_w = 1.1 * n_parties + 1.0
     panel_h = 0.4 * (n_datasets + 1) + 0.9
-    fig = plt.figure(figsize=(panel_w, panel_h))
-    outer = fig.add_gridspec(1, 1, left=0.16, right=0.95, top=TOP_PAD, bottom=0.06)
+    fig = plt.figure(figsize=(panel_w * ncols, panel_h * nrows))
+    outer = fig.add_gridspec(nrows, ncols, hspace=0.25, wspace=0.4, left=0.08, right=0.97,
+                              top=TOP_PAD, bottom=0.04)
 
-    _draw_table_panel(fig, outer[0, 0], labels, parties, condition_colors, value_fn, (-100, 100),
-                       "Affective polarization\n(own-party rating minus opposing-party rating)", "{:.0f}")
+    any_drawn = False
+    for r, row in enumerate(grid):
+        for c, (kind, role, title) in enumerate(row):
+            spec = outer[r, c]
+            if kind == "therm":
+                if not therm_present(role):
+                    continue
+                any_drawn = True
+                _draw_table_panel(fig, spec, labels, all_parties, condition_colors, therm_value_fn(role),
+                                   (0, 100), f"Feeling thermometer: {title}\n(obfuscated per condition)", "{:.0f}",
+                                   secondary_fn=therm_not_recognized_fn(role), secondary_prefix="nr")
+            elif kind == "polar_party":
+                if not party_polar_parties:
+                    continue
+                any_drawn = True
+                _draw_table_panel(fig, spec, labels, party_polar_parties, condition_colors, party_polar_fn,
+                                   (-100, 100), f"{title}\n(own-party rating minus opposing-party rating)", "{:.0f}")
+            elif kind == "polar_leader":
+                if not leader_polar_parties:
+                    continue
+                any_drawn = True
+                _draw_table_panel(fig, spec, labels, leader_polar_parties, condition_colors, leader_polar_fn,
+                                   (-100, 100), f"{title}\n(own party's leader minus other leader rating)", "{:.0f}")
 
+    if not any_drawn:
+        plt.close(fig)
+        print("No feeling-thermometer rows found in the comparison CSVs — skipping thermometer comparison plot.")
+        return
+
+    fig.text(0.01, 0.5, "Rating (0-100) / Polarization (-100 to 100)",
+              va="center", rotation="vertical", fontsize=10, color="#555555")
     fig.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
     fig.savefig(output_path.replace('.pdf', '.png'), dpi=300, bbox_inches='tight', facecolor='white')
     plt.close(fig)
     print(f"Saved to {output_path}")
 
     print(f"\n{'='*60}")
-    print("  Affective polarization (rows = obfuscation condition, columns = party)")
+    print("  Feeling thermometer (rows = obfuscation condition, columns = party)")
     print(f"{'='*60}")
-    _print_comparison_table("Affective polarization (own-party minus opposing-party rating)",
-                             labels, parties, value_fn)
+    for role, person_label in [("democrats", "Democrats"), ("biden", "Biden"),
+                                ("republicans", "Republicans"), ("trump", "Trump")]:
+        if not therm_present(role):
+            continue
+        _print_comparison_table(f"Feeling thermometer: {person_label}", labels, all_parties, therm_value_fn(role),
+                                 secondary_fn=therm_not_recognized_fn(role), secondary_prefix="nr")
+
+    if party_polar_parties:
+        print(f"\n{'='*60}")
+        print("  Affective polarization (rows = obfuscation condition, columns = party)")
+        print(f"{'='*60}")
+        _print_comparison_table("Affective polarization (party): own-party minus opposing-party rating",
+                                 labels, party_polar_parties, party_polar_fn)
+    if leader_polar_parties:
+        _print_comparison_table("Affective polarization (leader): own party's leader minus other leader rating",
+                                 labels, leader_polar_parties, leader_polar_fn)
 
 
 def parse_args() -> argparse.Namespace:
@@ -561,9 +639,13 @@ def main() -> None:
 
     print_population_table(population)
 
-    follow_keys = ['q1_dem', 'q1_rep', 'q2', 'q3', 'q4', 'q5']
-    trait_keys  = ([f"dem_{key}" for key, _ in TRAIT_QUESTIONS]
-                  + [f"rep_{key}" for key, _ in TRAIT_QUESTIONS])
+    # Row 1: Democrats / loves Biden / hates Biden. Row 2: Republicans / loves
+    # Trump / hates Trump — each party grouped with its own leader's questions.
+    follow_keys = ['q1_dem', 'q4', 'q5', 'q1_rep', 'q2', 'q3']
+    # Interleaved (dem, rep) per trait — not all-Democrat-traits-then-all-Republican
+    # — so the trait battery plot below can put each trait's two panels side by
+    # side (e.g. "Democrats: intelligent?" right next to "Republicans: intelligent?").
+    trait_keys  = [k for key, _ in TRAIT_QUESTIONS for k in (f"dem_{key}", f"rep_{key}")]
 
     question_labels = {
         'q1_dem': "Would you follow\na member of Democrats\n(obfuscated per condition)?",
@@ -590,12 +672,6 @@ def main() -> None:
     # comparison file) so conditions with extra questions still get reported.
     all_keys = follow_keys + trait_keys
 
-    dont_know_present = [
-        (k, question_labels.get(k, question_texts.get(k, k)) + "\n(don't know)")
-        for k in trait_keys
-        if all(((df["metric"] == "question") & (df["key"] == k)).any() for df in dfs.values())
-    ]
-
     all_parties = sorted(set().union(*[set(df["party"].dropna().unique()) for df in dfs.values()]))
     labels      = list(dfs.keys())
 
@@ -608,16 +684,17 @@ def main() -> None:
     # is the honest comparison — a connecting line would imply an ordering that isn't there.
     plot_metric_comparison(dfs, follow_present, all_parties, condition_colors,
                             fig_path("interview_results_obfuscation", args.batch_id), "question", "pct_yes_mean", "pct_yes_std",
-                            ncols=len(follow_present) or 1)
-    # Trait battery: one row for Democrats, one for Republicans, columns aligned by trait.
+                            ncols=3)
+    # Trait battery: one row per trait, Democrats and Republicans side by side
+    # (trait_keys is already interleaved dem/rep, so a 2-column grid lines up
+    # each trait's pair of panels instead of splitting all-dem/all-rep onto
+    # separate rows). Each cell also carries its don't-know rate (small "dk NN%"
+    # label, top-right of the bar) — makes forced-choice artifacts (non-partisans
+    # with no basis to judge an obfuscated group) visible in this same chart
+    # instead of a separate one.
     plot_metric_comparison(dfs, trait_present, all_parties, condition_colors,
                             fig_path("interview_results_obfuscation_traits", args.batch_id), "question", "pct_yes_mean", "pct_yes_std",
-                            ncols=len(TRAIT_QUESTIONS))
-    # Trait "dont_know" rate: makes forced-choice artifacts (non-partisans with no
-    # basis to judge an obfuscated group) visible instead of them defaulting to "No".
-    plot_metric_comparison(dfs, dont_know_present, all_parties, condition_colors,
-                            fig_path("interview_results_obfuscation_traits_dont_know", args.batch_id), "question", "pct_dont_know_mean", "pct_dont_know_std",
-                            ncols=len(TRAIT_QUESTIONS), value_label="Fraction answering \"don't know\"")
+                            ncols=2, show_dont_know=True)
 
     print(f"\n{'='*60}")
     print("  Question answers (rows = obfuscation condition, columns = party)")
@@ -626,8 +703,6 @@ def main() -> None:
 
     plot_thermometer_comparison(dfs, all_parties, condition_colors,
                                  fig_path("interview_results_obfuscation_thermometer", args.batch_id))
-    plot_affective_polarization_comparison(dfs, condition_colors,
-                                            fig_path("interview_results_obfuscation_affective_polarization", args.batch_id))
 
 
 if __name__ == "__main__":

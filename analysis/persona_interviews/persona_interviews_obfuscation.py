@@ -14,50 +14,16 @@ from openai import OpenAI, LengthFinishReasonError
 from pydantic import BaseModel, ValidationError
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../PersonaGeneration'))
 sys.path.insert(0, os.path.dirname(__file__))
 
 import interview_wandb  # noqa: E402
-
-# Obfuscated Trump/Biden labels are defined per obfuscation mode in this CSV
-# (see PersonaGeneration/anes_generate_personas.py, which generated the persona files).
-OBFUSCATION_CSV = os.path.join(os.path.dirname(__file__), "../../PersonaGeneration/persona_obfuscations.csv")
-
-# Suffix anes_generate_personas.py embeds in persona filenames per obfuscation
-# condition -> (obfuscation id, persona_obfuscations.csv column).
-FILENAME_SUFFIX_INFO = {
-    "obfNeutral_":     ("neutral",     "A_Neutral"),
-    "obfNonce_":       ("nonce",       "B_Nonce"),
-    "obfRandomReal_":  ("randomreal",  "C_RandomReal"),
-    "obfRandomNonce_": ("randomnonce", "D_RandomNonce"),
-}
-
-
-def _infer_obfuscation(personas_setting: str) -> str:
-    """Best-effort fallback: infer the obfuscation condition ('none' if no suffix
-    matches) from the persona filename convention, for callers that don't already
-    know it explicitly (e.g. this script run standalone)."""
-    return next((o for suffix, (o, _) in FILENAME_SUFFIX_INFO.items() if suffix in personas_setting), "none")
-
-
-def _lookup_obfuscated_terms(personas_setting: str, terms: list[str]) -> list[str]:
-    """Translate `terms` through the obfuscation mode encoded in personas_setting."""
-    column = next((c for suffix, (_, c) in FILENAME_SUFFIX_INFO.items() if suffix in personas_setting), None)
-    if column is None:
-        return terms
-    df = pd.read_csv(OBFUSCATION_CSV).set_index("Term")
-    return [df.loc[term, column] for term in terms]
-
-
-def get_political_figure_labels(personas_setting: str) -> tuple[str, str]:
-    """Return (trump_label, biden_label) matching the obfuscation mode encoded in personas_setting."""
-    trump_label, biden_label = _lookup_obfuscated_terms(personas_setting, ["Donald Trump", "Joe Biden"])
-    return trump_label, biden_label
-
-
-def get_party_labels(personas_setting: str) -> tuple[str, str]:
-    """Return (democrats_label, republicans_label) matching the obfuscation mode encoded in personas_setting."""
-    democrats_label, republicans_label = _lookup_obfuscated_terms(personas_setting, ["Democrats", "Republicans"])
-    return democrats_label, republicans_label
+from obfuscation_labels import (  # noqa: E402
+    infer_obfuscation as _infer_obfuscation,
+    get_political_figure_labels,
+    get_party_labels,
+    build_group_context,
+)
 
 
 # GPT-5-family models spend part of their completion budget on hidden reasoning
@@ -113,27 +79,6 @@ def build_questions(
         *[(f"dem_{key}", f"Do you think {democrats_label} are {trait}?") for key, trait in TRAIT_QUESTIONS],
         *[(f"rep_{key}", f"Do you think {republicans_label} are {trait}?") for key, trait in TRAIT_QUESTIONS],
     ]
-
-
-def build_group_context(
-    trump_label: str, biden_label: str, democrats_label: str, republicans_label: str
-) -> str:
-    """A short scene-setting paragraph naming the two rival political affiliations
-    and their associated leader, using whatever labels (real or obfuscated) are in
-    play. Personas already have their own affiliation/leader in their bio, but under
-    obfuscation the *opposing* party's label is often never mentioned anywhere in
-    their persona text — so without this, the model has no basis at all for
-    answering questions about that opposing label (it's just an unrecognized
-    string). This gives the minimal relational grounding needed to answer, without
-    revealing which (real-world) party either obfuscated label maps to."""
-    return (
-        f"For context: {democrats_label} and {republicans_label} are the two rival "
-        "political affiliations in this society — every adult identifies with one "
-        "of them, the other, or neither. "
-        f"{biden_label} and {trump_label} are the two most prominent national "
-        f"political leaders, with {biden_label} aligned with {democrats_label} and "
-        f"{trump_label} aligned with {republicans_label}."
-    )
 
 
 def build_thermometer_targets(

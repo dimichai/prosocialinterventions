@@ -47,7 +47,7 @@ def get_party_labels(personas_setting: str) -> tuple[str, str]:
 def build_group_context(
     trump_label: str, biden_label: str, democrats_label: str, republicans_label: str
 ) -> str:
-    """A short scene-setting paragraph naming the two rival political affiliations
+    """A short scene-setting paragraph naming the two rival political affiliationsp
     and their associated leader, using whatever labels (real or obfuscated) are in
     play. Personas already have their own affiliation/leader in their bio, but under
     obfuscation the *opposing* party's label is often never mentioned anywhere in
@@ -56,10 +56,9 @@ def build_group_context(
     string). This gives the minimal relational grounding needed to answer, without
     revealing which (real-world) party either obfuscated label maps to."""
     return (
-        f"For context: {democrats_label} and {republicans_label} are the two rival "
-        "political affiliations in this society — every adult identifies with one "
-        "of them, the other, or neither. "
-        f"{biden_label} and {trump_label} are the two most prominent national "
-        f"political leaders, with {biden_label} aligned with {democrats_label} and "
+        f"For context: {democrats_label} and {republicans_label} are two "
+        "political affiliations in this society."
+        f"{biden_label} and {trump_label} are the two party leaders,"
+        f" with {biden_label} aligned with {democrats_label} and "
         f"{trump_label} aligned with {republicans_label}."
     )

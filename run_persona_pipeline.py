@@ -142,6 +142,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--openrouter_api_key", type=int, default=None,
                          help="If None, use the OpenAI key; otherwise which "
                               "OpenRouter API key to use from env (1, 2, or 3).")
+    # Simulation-prompt ablations — separate from --ablations (which is generation-
+    # content-only) since these ablate what's shown in the agent's prompt at
+    # simulate time, not what's in the generated persona text.
+    parser.add_argument("--no_personas", action="store_true", default=False,
+                         help="Omit the persona description from the agent's system "
+                              "prompt (neutral-agent baseline).")
+    parser.add_argument("--no_bio", action="store_true", default=False,
+                         help="Omit the target user's bio when an agent decides "
+                              "whether to follow them.")
+    parser.add_argument("--no_news_category", action="store_true", default=False,
+                         help="Omit the news category when an agent decides which "
+                              "news to share.")
 
     # Shared
     parser.add_argument("--include_group_context", action="store_true", default=False,
@@ -215,6 +227,9 @@ def main() -> None:
                     "simulation_steps": args.simulation_steps,
                     "user_link_strategy": args.user_link_strategy,
                     "timeline_select_strategy": args.timeline_select_strategy,
+                    "no_personas": args.no_personas,
+                    "no_bio": args.no_bio,
+                    "no_news_category": args.no_news_category,
                     "trump_label": trump_label,
                     "biden_label": biden_label,
                     "democrats_label": democrats_label,
@@ -280,6 +295,9 @@ def main() -> None:
                 own_wandb_run=False,
                 include_group_context=args.include_group_context,
                 wandb_project=args.wandb_project,
+                no_personas=args.no_personas,
+                no_bio=args.no_bio,
+                no_news_category=args.no_news_category,
             )
         else:
             print("Skipping simulation stage.")

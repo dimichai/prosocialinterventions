@@ -9,7 +9,6 @@ import time
 import wandb
 import numpy as np
 
-from pathlib import Path
 from collections import Counter
 from openai import OpenAI
 
@@ -147,28 +146,23 @@ def log_action(user, action):
 
     return log_msg
 
-def select_users(persona_path, n):
+def select_users(persona_path, n, personas=None):
     """
-    Create a sample of users for the simulation from the persona file.
+    Create a sample of `n` users for the simulation, from an in-memory `personas`
+    list when given, otherwise loaded from the persona file at `persona_path`.
+
+    Previously forced an exact 45% Democrat / 46% Republican / 9% Non-partisan split
+    (per Gallup, 2025) by sampling that many from each party's sub-pool. That only
+    works when the pool is large relative to `n`; now that run_persona_pipeline.py's
+    --num_personas drives both how many personas are generated and the simulation's
+    population size (n == len(users)), it needs the pool's *actual* party mix to
+    already match those fractions almost exactly — which raw ANES sampling doesn't
+    guarantee (its natural split runs closer to 47/42/11), so that approach fails
+    reliably rather than rarely. Simulating the whole given pool (in whatever party
+    mix it naturally has) instead of forcing a target split avoids that failure mode.
     """
-
-    # According to Gallup, 45% of Americans identify as Democrats, 46% as Republicans, and 9% as other (2025)
-    fraction_democrat = 0.45
-    fraction_republican = 0.46
-    fraction_non_partisan = 0.09
-
-    users = json.load(open(persona_path, 'r'))
-
-    democrat_users = [user for user in users if user['party'] == 'Democrat']
-    republican_users = [user for user in users if user['party'] == 'Republican']
-    non_partisan_users = [user for user in users if user['party'] == 'Non-partisan']
-
-    # Randomly sample users from each group
-    democrat_sample = random.sample(democrat_users, int(n * fraction_democrat))
-    republican_sample = random.sample(republican_users, int(n * fraction_republican))
-    non_partisan_sample = random.sample(non_partisan_users, int(n * fraction_non_partisan))
-
-    return democrat_sample + republican_sample + non_partisan_sample
+    users = personas if personas is not None else json.load(open(persona_path, 'r'))
+    return random.sample(users, min(n, len(users)))
 
 def get_persona_label(personas_file, no_personas, no_bio):
     """
@@ -192,14 +186,19 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
                 show_info = True,
                 sim_path="",
                 personas_file = 'personas.json',
+                personas = None,
+                seed = None,
                 openrouter_api_key = None,
                 log = True,
-                save_full_log = False,
+                own_wandb_run = True,
                 no_personas = False,
                 no_bio = False,
                 no_news_category = False,
                 wandb_project = "prosocial-interventions",
                 include_group_context = False):
+
+    if seed is not None:
+        random.seed(seed)
 
     persona_label = get_persona_label(personas_file, no_personas, no_bio)
     obfuscation = infer_obfuscation(personas_file)
@@ -208,7 +207,7 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
         if include_group_context else ""
     )
 
-    if log:
+    if log and own_wandb_run:
         wandb.init(project=wandb_project,
             name=f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{persona_label}",
             config={
@@ -248,16 +247,14 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
         cost_output = model_costs[llm_model]["output"]
         cost_cached = model_costs[llm_model]["cached_input"]
 
-    # Define the path to the persona file
+    # Define the path to the persona file (unused when `personas` is supplied directly)
     persona_path = os.path.join(os.getcwd(), personas_file)
     news_feed = NewsFeed(news_feed)
 
-    filename = f"{sim_path}"
-
     platform = Platform(user_link_strategy=user_link_strategy, timeline_select_strategy=timeline_select_strategy, show_info=show_info)
-    
+
     # Ensure the right fraction of Democrats, Republicans, and non-partisans
-    selected_users = select_users(persona_path, n=simulation_size)
+    selected_users = select_users(persona_path, n=simulation_size, personas=personas)
 
     # Initialize the OpenRouter client
     model = llm_model
@@ -307,17 +304,6 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
             client.close()
 
             client = new_client
-    # except:
-    #     json.dump(platform.generate_log(), open(filename + '.json', 'w'), indent=4, default=str)
-
-    #     # Set reuse of platform
-    #     platform.set_client(None)
-    #     client.close()
-
-    #     pickle.dump(platform, open(filename + '.pkl', 'wb'))
-    
-    if save_full_log:
-        json.dump(platform.generate_log(), open(filename + '.json', 'w'), indent=4, default=str)
 
     # Set reuse of platform
     platform.set_client(None)
@@ -330,16 +316,18 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
             wandb.summary[f"final/{key}"] = value
 
         # Save platform pickle as a temporary file and upload as wandb artifact
+        run_label = sim_path or "run"
         with tempfile.NamedTemporaryFile(suffix='.pkl', delete=True) as tmp:
             pickle.dump(platform, tmp)
             tmp.flush()
             artifact = wandb.Artifact(
-                name=f"platform-{sim_path.stem}",
+                name=f"platform-{run_label}",
                 type="platform",
             )
-            artifact.add_file(tmp.name, name=f"{sim_path.stem}.pkl")
+            artifact.add_file(tmp.name, name=f"{run_label}.pkl")
             wandb.log_artifact(artifact)
-        wandb.finish()
+        if own_wandb_run:
+            wandb.finish()
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser()
@@ -352,7 +340,6 @@ if __name__ == "__main__":
     argparser.add_argument("--simulation_size", type=int, default=500, help="Number of users in the simulation")
     argparser.add_argument("--simulation_steps", type=int, default=5000, help="Number of steps to run the simulation for")
     argparser.add_argument('--no_log', action='store_true', default=False)
-    argparser.add_argument('--save_full_log', action='store_true', default=False, help="Whether to save the full log of the simulation in a json (can be large)")
     argparser.add_argument('--no_personas', action='store_true', default=False, help="Omit the persona description from the agent's system prompt (neutral-agent baseline)")
     argparser.add_argument('--no_bio', action='store_true', default=False, help="Omit the target user's bio when an agent decides whether to follow them")
     argparser.add_argument('--no_news_category', action='store_true', default=False, help="Omit the news category when an agent decides which news to share")
@@ -366,16 +353,13 @@ if __name__ == "__main__":
     args = argparser.parse_args()
 
     persona_label = get_persona_label(args.personas_file, args.no_personas, args.no_bio)
-    sim_dir = f"../results/{persona_label}_{args.user_link_strategy}_{args.timeline_select_strategy}"
-    sim_run = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    sim_path = Path(sim_dir, sim_run)
-    os.makedirs(sim_dir, exist_ok=True)
+    sim_path = f"{persona_label}_{args.user_link_strategy}_{args.timeline_select_strategy}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     print(f"Running simulation {sim_path}...")
 
     run_simulation(
-        simulation_size=args.simulation_size, 
+        simulation_size=args.simulation_size,
         simulation_steps=args.simulation_steps,
-        user_link_strategy=args.user_link_strategy, 
+        user_link_strategy=args.user_link_strategy,
         timeline_select_strategy=args.timeline_select_strategy,
         llm_model=args.llm_model,
         news_feed=args.news_feed,
@@ -383,7 +367,6 @@ if __name__ == "__main__":
         personas_file=args.personas_file,
         openrouter_api_key=args.openrouter_api_key,
         log = not args.no_log,
-        save_full_log=args.save_full_log,
         no_personas=args.no_personas,
         no_bio=args.no_bio,
         no_news_category=args.no_news_category,

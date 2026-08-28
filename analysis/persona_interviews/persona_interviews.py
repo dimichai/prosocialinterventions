@@ -172,14 +172,17 @@ def ask_feeling_thermometer(
 
 
 def interview_personas(
-    personas_file: str,
+    personas_file: str | None,
     questions: list[tuple[str, str]],
     thermometer_targets: list[tuple[str, str]],
     model: str,
+    personas: list[dict] | None = None,
     persona_sample: int | None = None,
     seed: int = 42,
     group_context: str = "",
 ) -> pd.DataFrame:
+    """Interview either an in-memory `personas` list, or (when not given) the
+    personas loaded from `personas_file`."""
 
     dotenv.load_dotenv(os.path.join(os.path.dirname(__file__), "../../.env"))
 
@@ -188,7 +191,8 @@ def interview_personas(
         api_key=os.getenv("OPENROUTER_API_KEY_1"),
     )
 
-    personas = json.load(open(personas_file, "r"))
+    if personas is None:
+        personas = json.load(open(personas_file, "r"))
     if persona_sample is not None:
         personas = random.Random(seed).sample(personas, min(persona_sample, len(personas)))
 
@@ -381,12 +385,25 @@ def run_interview_for_setting(
     log: bool = True,
     wandb_project: str = interview_wandb.WANDB_PROJECT,
     include_group_context: bool = False,
+    personas: list[dict] | None = None,
+    own_wandb_run: bool = True,
 ) -> dict:
-    """Interview the personas in src/<personas_setting>.json, once per seed, logging
-    each seed's raw per-persona results to wandb as its own run (all sharing one
-    wandb group/batch id). Aggregation across seeds is done later, on the analysis
-    side, by reading the runs back from wandb. Returns identifying info about the
-    runs that were logged."""
+    """Interview personas, once per seed, logging each seed's raw per-persona results
+    to wandb. `personas_setting` is always required (even when `personas` is supplied
+    directly) — it's used to resolve real/obfuscated labels and `group_context` via
+    obfuscation_labels, independent of where the persona data itself comes from.
+
+    By default (`personas=None`) reads personas from src/<personas_setting>.json, and
+    each seed gets its own wandb run, all sharing one wandb group/batch id — aggregation
+    across seeds is done later, on the analysis side, by reading the runs back from
+    wandb. When `personas` is supplied directly, that in-memory list is interviewed
+    instead of reading from disk.
+
+    When `own_wandb_run=False` (used when this is one stage of a larger orchestrated
+    run), this skips its own `wandb.init`/`wandb.finish()` per seed and instead logs
+    into whatever wandb run is already active — for that case, `seeds` should be a
+    single-element list, since the caller owns one run per seed. Returns identifying
+    info about the run(s) that were logged."""
 
     trump_label, biden_label = get_political_figure_labels(personas_setting)
     democrats_label, republicans_label = get_party_labels(personas_setting)
@@ -432,8 +449,8 @@ def run_interview_for_setting(
     for i, seed in enumerate(seeds):
         print(f"=== Seed {i + 1}/{len(seeds)} (seed={seed}) ===")
 
-        if log:
-            run = wandb.init(
+        if log and own_wandb_run:
+            wandb.init(
                 project=wandb_project,
                 group=group,
                 job_type="interview",
@@ -445,6 +462,7 @@ def run_interview_for_setting(
 
         df = interview_personas(
             personas_file=personas_file,
+            personas=personas,
             questions=questions,
             thermometer_targets=thermometer_targets,
             model=model,
@@ -469,10 +487,14 @@ def run_interview_for_setting(
             table_df[answer_cols] = table_df[answer_cols].astype(str)
             metrics["interview_results_table"] = wandb.Table(dataframe=table_df)
             wandb.log(metrics)
-            run_ids.append(run.id)
-            wandb.finish()
+            run_ids.append(wandb.run.id)
+            if own_wandb_run:
+                wandb.finish()
 
-    if log:
+    if log and own_wandb_run:
+        # Only accurate when this function owns the run(s) it logged to — when
+        # own_wandb_run=False, `wandb_project`/`group` are unused defaults, not
+        # where the data actually went (the caller owns and reports that instead).
         print(f"Logged {len(seeds)} run(s) to wandb project '{wandb_project}' (group={group})")
 
     return {"group": group, "obfuscation": obfuscation, "run_ids": run_ids}

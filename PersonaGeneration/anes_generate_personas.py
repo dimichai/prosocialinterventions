@@ -734,7 +734,7 @@ def return_persona_string():
     return personas[0]['persona']
 
 
-def extend_with_ai(persona, client):
+def extend_with_ai(persona, client, model="gpt-4o-mini"):
 
     prompt = f"""I am going to give you a persona of a person. I need you to fill in some other pieces, and generate the options THREE times:
 
@@ -748,9 +748,9 @@ Stay away from 'community' or 'volunteering'. Use your information on popular ho
 Please answer in the format I gave you. I will give you the persona now.
 
 {persona['persona']}"""
-    
+
     response = client.beta.chat.completions.parse(
-        model="gpt-4o-mini",
+        model=model,
         messages=[
             {"role": "system", "content": prompt},
         ],
@@ -769,9 +769,9 @@ Please answer in the format I gave you. I will give you the persona now.
     persona['persona'] += f"Your occupation is {chosen_occupation}.\n"
     persona['persona'] += f"You like {format_list(chosen_hobbies_interests)}.\n"
 
-def add_biography(persona, client, ignore_bio_love_hate=False, ignore_bio_party_identity=False, ignore_bio_voted2020=False):
+def add_biography(persona, client, model="gpt-4o-mini", ignore_bio_love_hate=False, ignore_bio_party_identity=False, ignore_bio_voted2020=False):
 
-    prompt = f"""Write a very short (max. 140 characters), very informal social media biography for the following persona: 
+    prompt = f"""Write a very short (max. 140 characters), very informal social media biography for the following persona:
 
 {persona['persona']}
 
@@ -783,9 +783,9 @@ You may add things that are not in the persona. Do not use emoji. Write as if yo
         prompt += "\nDo not include anything about your political party identity."
     if ignore_bio_voted2020:
         prompt += "\nDo not include anything about whether you voted in 2020."
-    
+
     response = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=model,
         messages=[
             {"role": "system", "content": prompt},
         ],
@@ -817,18 +817,15 @@ def build_argparser() -> argparse.ArgumentParser:
     argparser.add_argument("--ignore_bio_voted2020", action='store_true', default=False, help="Whether to ignore voted2020 info in bio")
     argparser.add_argument("--obfuscation", choices=['none', 'neutral', 'nonce', 'randomreal', 'randomnonce'], default='none', help="Obfuscate identifying terms in the persona text: none (as-is), neutral (generic labels), nonce (meaningless tokens), randomreal (random real terms), randomnonce (random meaningless tokens)")
     argparser.add_argument("--seed", type=int, default=42, help="Random seed for persona sampling and AI extension choices")
+    argparser.add_argument("--llm_model", type=str, default="gpt-4o-mini", help="OpenAI model used for AI-extended occupation/hobbies and the biography")
     return argparser
 
 
-def generate_personas_cli(args: argparse.Namespace) -> dict:
-    """Run the full generate -> extend-with-AI -> add-biography pipeline for one
-    obfuscation condition and write both output JSON files to PersonaGeneration/,
-    same as the CLI has always done. Returns their absolute paths."""
+def sample_personas(args: argparse.Namespace) -> list[dict]:
+    """Sample `args.num_personas` personas from ANES, applying the chosen obfuscation
+    condition and content ablations. Pure — no disk I/O, no AI enrichment."""
 
     random.seed(args.seed)
-
-    #Example usage
-    # print(return_persona_string())
 
     # --minimal_persona is a shorthand that forces these sentence categories off,
     # regardless of whether their individual --ignore_* flags were also passed.
@@ -837,7 +834,7 @@ def generate_personas_cli(args: argparse.Namespace) -> dict:
     ignore_political_behaviour = args.ignore_political_behaviour or args.minimal_persona
     ignore_leisure = args.ignore_leisure or args.minimal_persona
 
-    personas = get_anes_rows(args.num_personas,
+    return get_anes_rows(args.num_personas,
                             ignore_love_hate=args.ignore_love_hate,
                             ignore_party_identity=args.ignore_party_identity,
                             ignore_voted2020=args.ignore_voted2020,
@@ -851,6 +848,58 @@ def generate_personas_cli(args: argparse.Namespace) -> dict:
                             ignore_state=ignore_state,
                             obfuscation=args.obfuscation,
                             seed=args.seed)
+
+
+def enrich_personas(
+    personas: list[dict],
+    *,
+    model: str = "gpt-4o-mini",
+    ignore_extend_with_ai: bool = False,
+    ignore_bio: bool = False,
+    ignore_bio_love_hate: bool = False,
+    ignore_bio_party_identity: bool = False,
+    ignore_bio_voted2020: bool = False,
+) -> list[dict]:
+    """Extend each persona in place with AI-generated occupation/hobbies and a
+    biography. Pure — no disk I/O. Up to 2 sequential OpenAI calls per persona (both
+    using `model`); the dominant cost/latency of persona generation."""
+
+    dotenv.load_dotenv(os.path.join(SCRIPT_DIR, '..', '.env'))
+    client = openai.OpenAI()
+
+    for i, persona in enumerate(personas, start=1):
+        print(i)
+        if not ignore_extend_with_ai:
+            extend_with_ai(persona, client, model=model)
+        if not ignore_bio:
+            add_biography(
+                persona, client, model=model,
+                ignore_bio_love_hate=ignore_bio_love_hate,
+                ignore_bio_party_identity=ignore_bio_party_identity,
+                ignore_bio_voted2020=ignore_bio_voted2020,
+            )
+        else:
+            persona['biography'] = None
+        print(persona['persona'], persona['biography'])
+        print()
+
+    return personas
+
+
+def generate_personas_cli(args: argparse.Namespace) -> dict:
+    """Run the full generate -> extend-with-AI -> add-biography pipeline for one
+    obfuscation condition and write both output JSON files to PersonaGeneration/,
+    same as the CLI has always done. Returns their absolute paths."""
+
+    # --minimal_persona is a shorthand that forces these sentence categories off,
+    # regardless of whether their individual --ignore_* flags were also passed. Recomputed
+    # here (matching sample_personas) only because the output filenames below need it.
+    ignore_state = args.ignore_state or args.minimal_persona
+    ignore_problems = args.ignore_problems or args.minimal_persona
+    ignore_political_behaviour = args.ignore_political_behaviour or args.minimal_persona
+    ignore_leisure = args.ignore_leisure or args.minimal_persona
+
+    personas = sample_personas(args)
 
     personas_file_name = (
         f"{datetime.now().strftime('%Y%m%d')}_personas_{args.num_personas}_"
@@ -877,23 +926,15 @@ def generate_personas_cli(args: argparse.Namespace) -> dict:
     personas_file_path = os.path.join(SCRIPT_DIR, personas_file_name)
     json.dump(personas, open(personas_file_path,"w"))
 
-    dotenv.load_dotenv(os.path.join(SCRIPT_DIR, '..', '.env'))
-
-    client = openai.OpenAI()
-
-    personas = json.load(open(personas_file_path))
-    i=1
-    for persona in personas:
-        print(i)
-        i+=1
-        if not args.ignore_extend_with_ai:
-            extend_with_ai(persona, client)
-        if not args.ignore_bio:
-            add_biography(persona, client)
-        else:
-            persona['biography'] = None
-        print(persona['persona'], persona['biography'])
-        print()
+    personas = enrich_personas(
+        personas,
+        model=args.llm_model,
+        ignore_extend_with_ai=args.ignore_extend_with_ai,
+        ignore_bio=args.ignore_bio,
+        ignore_bio_love_hate=args.ignore_bio_love_hate,
+        ignore_bio_party_identity=args.ignore_bio_party_identity,
+        ignore_bio_voted2020=args.ignore_bio_voted2020,
+    )
 
     filename = (
         f"{datetime.now().strftime('%Y%m%d')}_personas_with_bio_{args.num_personas}_"

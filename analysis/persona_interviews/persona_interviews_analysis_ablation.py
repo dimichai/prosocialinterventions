@@ -88,9 +88,9 @@ def load_and_prepare(path: str) -> pd.DataFrame:
         col = f"{k}_answer"
         if col in df.columns:
             normalized = df[col].astype(str).str.strip().str.lower()
-            # Trait questions allow a "dont_know" answer (see persona_interviews.py /
-            # persona_interviews_obfuscation.py). Map it (and any error rows) to NaN
-            # rather than 0, so it doesn't get silently counted as "No" below.
+            # Trait questions allow a "dont_know" answer (see persona_interviews.py).
+            # Map it (and any error rows) to NaN rather than 0, so it doesn't get
+            # silently counted as "No" below.
             df[f"{col}_dont_know"] = normalized.eq("dont_know")
             df[col] = normalized.map({"true": 1.0, "false": 0.0})
     return df

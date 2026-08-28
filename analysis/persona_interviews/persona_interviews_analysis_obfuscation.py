@@ -10,7 +10,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(__file__))
 
 import interview_wandb  # noqa: E402
-import persona_interviews_obfuscation as interview  # noqa: E402
+import persona_interviews as interview  # noqa: E402
 
 plt.rcParams.update({
     # Font
@@ -59,7 +59,7 @@ plt.rcParams.update({
 
 
 # Generic fallback labels — this script compares across conditions, so there's
-# no single "current" obfuscation to derive labels from (unlike persona_interviews_obfuscation.py).
+# no single "current" obfuscation to derive labels from (unlike persona_interviews.py).
 # (key_suffix, trait) — asked once for Democrats and once for Republicans
 TRAIT_QUESTIONS = [
     ("intelligent",   "intelligent"),
@@ -154,7 +154,7 @@ def fetch_condition_dfs(
     batch_id: str, wandb_project: str = interview_wandb.WANDB_PROJECT
 ) -> tuple[dict[str, pd.DataFrame], dict[str, dict[str, tuple[float, float]]]]:
     """Fetch every wandb run sharing `batch_id` (one run per obfuscation x seed,
-    written by run_persona_obf_pipeline.py / persona_interviews_obfuscation.py),
+    written by run_persona_obf_pipeline.py / persona_interviews.py),
     download each run's raw per-persona results, and aggregate across seeds within
     each obfuscation condition — i.e. the same shape `load_and_prepare` used to
     return from a pre-aggregated local CSV, just sourced from wandb instead.

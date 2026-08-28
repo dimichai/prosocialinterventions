@@ -3,55 +3,46 @@ import os
 import sys
 import json
 import random
+import uuid
+from datetime import datetime
 from typing import Literal
 
 import dotenv
 import pandas as pd
-from openai import OpenAI
-from pydantic import BaseModel
+import wandb
+from openai import OpenAI, LengthFinishReasonError
+from pydantic import BaseModel, ValidationError
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../PersonaGeneration'))
+sys.path.insert(0, os.path.dirname(__file__))
 
-
-# (key_suffix, trait) — asked once for Democrats and once for Republicans
-TRAIT_QUESTIONS = [
-    ("intelligent",   "intelligent"),
-    ("honest",        "honest"),
-    ("openminded",    "open-minded"),
-    ("generous",      "generous"),
-    ("hypocritical",  "hypocritical"),
-    ("selfish",       "selfish"),
-    ("mean",          "mean"),
-]
-
-QUESTIONS = [
-    ("q1", "Would you follow someone who is a member of the opposing political party?"),
-    ("q2", "Would you follow someone who loves Donald Trump?"),
-    ("q3", "Would you follow someone who hates Donald Trump?"),
-    ("q4", "Would you follow someone who loves Joe Biden?"),
-    ("q5", "Would you follow someone who hates Joe Biden?"),
-    *[(f"dem_{key}", f"Do you think Democrats are {trait}?") for key, trait in TRAIT_QUESTIONS],
-    *[(f"rep_{key}", f"Do you think Republicans are {trait}?") for key, trait in TRAIT_QUESTIONS],
-]
-
-THERMOMETER_INTRO = (
-    "I’d like to get your feelings toward some of our political leaders and other "
-    "people who are in the news these days. I’ll read the name of a person and I’d "
-    "like you to rate that person using something we call the feeling thermometer.\n\n"
-    "Ratings between 50 degrees and 100 degrees mean that you feel favorable and warm "
-    "toward the person. Ratings between 0 degrees and 50 degrees mean that you don’t "
-    "feel favorable toward the person and that you don’t care too much for that "
-    "person. You would rate the person at the 50 degree mark if you don’t feel "
-    "particularly warm or cold toward the person.\n\n"
-    "If we come to a person whose name you don’t recognize, you don’t need to rate "
-    "that person. Just tell me and we’ll move on to the next one."
+import interview_wandb  # noqa: E402
+from obfuscation_labels import (  # noqa: E402
+    infer_obfuscation as _infer_obfuscation,
+    get_political_figure_labels,
+    get_party_labels,
+    build_group_context,
+)
+from question_battery import (  # noqa: E402
+    THERMOMETER_INTRO,
+    build_questions,
+    build_thermometer_targets,
 )
 
-# role -> display label shown in the question text
-THERMOMETER_TARGETS = [
-    ("biden", "Joe Biden"),
-    ("trump", "Donald Trump"),
-]
+
+# GPT-5-family models spend part of their completion budget on hidden reasoning
+# tokens before writing the visible answer, so a max_tokens value that's ample
+# for gpt-4o-mini-style models can still truncate them mid-JSON.
+REASONING_MODEL_PREFIXES = ("gpt-5", "openai/gpt-5", "o1", "o3", "o4")
+DEFAULT_MAX_TOKENS = 16384
+REASONING_MODEL_MAX_TOKENS = 32768
+
+
+def _max_tokens_for_model(model: str) -> int:
+    if model.lower().startswith(REASONING_MODEL_PREFIXES):
+        return REASONING_MODEL_MAX_TOKENS
+    return DEFAULT_MAX_TOKENS
 
 
 class BooleanAnswer(BaseModel):
@@ -61,9 +52,9 @@ class BooleanAnswer(BaseModel):
 
 class TraitAnswer(BaseModel):
     # Trait questions ask a persona to characterize an entire political party.
-    # A non-partisan under heavy obfuscation may genuinely have no basis to
-    # judge the (obfuscated) group, so we let them opt out instead of forcing
-    # a "no" that would be indistinguishable from genuine negativity.
+    # Under obfuscation, a non-partisan may genuinely have no basis to judge
+    # the (obfuscated) group, so we let them opt out instead of forcing a "no"
+    # that would be indistinguishable from genuine negativity.
     choice: Literal["yes", "no", "dont_know"]
     explanation: str
 
@@ -73,25 +64,30 @@ class ThermometerAnswer(BaseModel):
     rating: int | None   # 0-100, None if not recognized
 
 
-def _system_message(persona: dict) -> str:
-    return (
-        "You are a user of a social media platform. "
-        "This is a platform where users share opinions and thoughts on topics of interest "
-        "in the form of posts.\n\n"
+def _system_message(persona: dict, group_context: str = "") -> str:
+    message = (
         "Here is a description of your persona:\n"
         f"{persona['persona']}"
     )
+    if group_context:
+        message += f"\n\n{group_context}"
+    return message
 
 
 def ask_question(
-    client: OpenAI, persona: dict, question: str, model: str, allow_dont_know: bool = False
-) -> tuple[bool | str, str]:
+    client: OpenAI, persona: dict, question: str, model: str,
+    allow_dont_know: bool = False, group_context: str = "",
+) -> tuple[bool | str | None, str]:
     """Send a question to the LLM and return (answer, explanation).
 
     `answer` is True/False for a yes/no question. When `allow_dont_know` is set
     (used for the trait battery), the persona may instead answer "dont_know",
-    which is returned as the literal string "dont_know" rather than being
-    coerced into a boolean.
+    returned as the literal string "dont_know" rather than being coerced into
+    a boolean.
+
+    Returns (None, "<error>") if the model's response was truncated before it
+    could produce valid structured output (rare, but happens on some
+    OpenRouter models/personas) rather than raising and aborting the whole run.
     """
 
     response_format = TraitAnswer if allow_dont_know else BooleanAnswer
@@ -102,24 +98,35 @@ def ask_question(
         "Reply with 'yes' or 'no'. Also provide a short explanation for your answer."
     )
 
-    response = client.beta.chat.completions.parse(
-        model=model,
-        messages=[
-            {"role": "system", "content": _system_message(persona)},
-            {"role": "user", "content": f"{question}\n\n{instruction}"},
-        ],
-        response_format=response_format,
-        temperature=1.0,
-    )
+    for attempt in range(2):
+        try:
+            response = client.beta.chat.completions.parse(
+                model=model,
+                messages=[
+                    {"role": "system", "content": _system_message(persona, group_context)},
+                    {"role": "user", "content": f"{question}\n\n{instruction}"},
+                ],
+                response_format=response_format,
+                max_tokens=_max_tokens_for_model(model),
+                temperature=1.0,
+            )
+            parsed = response.choices[0].message.parsed
+            choice = parsed.choice.strip().lower()
+            if choice == "dont_know":
+                return "dont_know", parsed.explanation
+            return choice == "yes", parsed.explanation
+        except (LengthFinishReasonError, ValidationError):
+            # Some OpenRouter providers truncate the completion without reporting
+            # finish_reason="length", so the SDK doesn't raise LengthFinishReasonError
+            # and instead fails to parse the incomplete JSON (ValidationError).
+            print(f"    [warn] [id={persona.get('persona_index')}] truncated response on attempt {attempt + 1} for question: {question!r}")
 
-    parsed = response.choices[0].message.parsed
-    choice = parsed.choice.strip().lower()
-    if choice == "dont_know":
-        return "dont_know", parsed.explanation
-    return choice == "yes", parsed.explanation
+    return None, "ERROR: response truncated (length limit reached) after retry"
 
 
-def ask_feeling_thermometer_single(client: OpenAI, persona: dict, label: str, model: str) -> tuple[bool, int | None]:
+def ask_feeling_thermometer_single(
+    client: OpenAI, persona: dict, label: str, model: str, group_context: str = "",
+) -> tuple[bool | None, int | None]:
     """Rate a single thermometer target in its own call, with no other target in context."""
 
     prompt = (
@@ -129,40 +136,49 @@ def ask_feeling_thermometer_single(client: OpenAI, persona: dict, label: str, mo
         "whole-number rating between 0 and 100."
     )
 
-    response = client.beta.chat.completions.parse(
-        model=model,
-        messages=[
-            {"role": "system", "content": _system_message(persona)},
-            {"role": "user", "content": prompt},
-        ],
-        response_format=ThermometerAnswer,
-        temperature=1.0,
-    )
+    for attempt in range(2):
+        try:
+            response = client.beta.chat.completions.parse(
+                model=model,
+                messages=[
+                    {"role": "system", "content": _system_message(persona, group_context)},
+                    {"role": "user", "content": prompt},
+                ],
+                response_format=ThermometerAnswer,
+                max_tokens=_max_tokens_for_model(model),
+                temperature=1.0,
+            )
+            parsed = response.choices[0].message.parsed
+            return parsed.recognized, parsed.rating
+        except (LengthFinishReasonError, ValidationError):
+            print(f"    [warn] [id={persona.get('persona_index')}] truncated thermometer response on attempt {attempt + 1} for {label!r}")
 
-    parsed = response.choices[0].message.parsed
-    return parsed.recognized, parsed.rating
+    return None, None
 
 
-def ask_feeling_thermometer(client: OpenAI, persona: dict, targets: list[tuple[str, str]], model: str) -> dict:
+def ask_feeling_thermometer(
+    client: OpenAI, persona: dict, targets: list[tuple[str, str]], model: str, group_context: str = "",
+) -> dict:
     """Rate each thermometer target with a separate call (avoids order/anchoring
     effects from batching multiple targets into one comparative call)."""
 
     row = {}
     for role, label in targets:
-        recognized, rating = ask_feeling_thermometer_single(client, persona, label, model)
+        recognized, rating = ask_feeling_thermometer_single(client, persona, label, model, group_context)
         row[f"{role}_therm_recognized"] = recognized
         row[f"{role}_therm_rating"]     = rating
+        print(f"    [id={persona.get('persona_index')}] [{role}_therm] recognized={recognized!r} rating={rating!r}")
     return row
 
 
 def interview_personas(
     personas_file: str,
-    output_file: str | None,
     questions: list[tuple[str, str]],
     thermometer_targets: list[tuple[str, str]],
     model: str,
     persona_sample: int | None = None,
     seed: int = 42,
+    group_context: str = "",
 ) -> pd.DataFrame:
 
     dotenv.load_dotenv(os.path.join(os.path.dirname(__file__), "../../.env"))
@@ -203,48 +219,32 @@ def interview_personas(
             "gender":        persona.get("gender", ""),
             "race":          persona.get("race", ""),
             "state":         persona.get("state", ""),
+            # Raw ANES-derived attributes (ground truth, not LLM-elicited) — kept
+            # here so run-level population stats can be computed from this same
+            # dataframe (see interview_wandb.persona_population_metrics).
+            "feelingDemocratic": persona.get("feelingDemocratic"),
+            "feelingRepublican": persona.get("feelingRepublican"),
+            "partisan":          persona.get("partisan"),
+            "voted2020_for":     persona.get("voted2020_for"),
         }
 
         for key, question in active_questions:
             allow_dont_know = key.startswith(("dem_", "rep_"))
-            answer, explanation = ask_question(client, persona, question, model, allow_dont_know=allow_dont_know)
+            answer, explanation = ask_question(
+                client, persona, question, model,
+                allow_dont_know=allow_dont_know, group_context=group_context,
+            )
             row[f"{key}_answer"]      = answer          # True / False / "dont_know"
             row[f"{key}_explanation"] = explanation
+            print(f"    [id={persona_id}] [{key}] {answer!r} — {explanation}")
 
-        row.update(ask_feeling_thermometer(client, persona, thermometer_targets, model))
+        row.update(ask_feeling_thermometer(client, persona, thermometer_targets, model, group_context))
 
         results.append(row)
 
     df = pd.DataFrame(results)
-    if output_file:
-        df.to_csv(output_file, index=False)
-        print(f"Results saved to {output_file}")
-
     client.close()
     return df
-
-
-def _pct_yes_no_dontknow(answers: pd.Series) -> tuple[float, float, int]:
-    """From a raw `{key}_answer` column (True/False/"dont_know"/None), return
-    (pct_yes, pct_dont_know, n_answered) for one run."""
-    is_dont_know = answers.eq("dont_know")
-    n_total = int(answers.notna().sum())
-    yes_no = answers[~is_dont_know].map({True: 1.0, False: 0.0})
-    n_answered = int(yes_no.notna().sum())
-    pct_yes = yes_no.mean() if n_answered else float("nan")
-    pct_dont_know = (is_dont_know.sum() / n_total) if n_total else float("nan")
-    return pct_yes, pct_dont_know, n_answered
-
-
-def _pct_recognized_and_rating(recognized: pd.Series, rating: pd.Series) -> tuple[float, float, int]:
-    """From raw `{role}_therm_recognized`/`{role}_therm_rating` columns, return
-    (pct_recognized, mean_rating_among_recognized, n_recognized) for one run."""
-    rec_numeric = recognized.map({True: 1.0, False: 0.0})
-    n_total = int(rec_numeric.notna().sum())
-    pct_recognized = rec_numeric.mean() if n_total else float("nan")
-    recognized_ratings = pd.to_numeric(rating[recognized == True], errors="coerce")
-    mean_rating = recognized_ratings.mean() if recognized_ratings.notna().any() else float("nan")
-    return pct_recognized, mean_rating, n_total
 
 
 def aggregate_interview_runs(
@@ -259,7 +259,7 @@ def aggregate_interview_runs(
     correspondence across runs. Instead this computes a per-party summary stat
     (yes-rate per question, mean thermometer rating) within each run, then averages
     those summary stats across runs — mirroring the aggregation convention used in
-    persona_interviews_analysis_ablation.py (dont_know excluded from the yes/no
+    persona_interviews_analysis_obfuscation.py (dont_know excluded from the yes/no
     rate, grouped by `party`). Free-text explanations aren't averaged and are
     dropped from this output.
     """
@@ -273,7 +273,7 @@ def aggregate_interview_runs(
             if col not in df.columns:
                 continue
             for party, group in df.groupby("party"):
-                pct_yes, pct_dont_know, n = _pct_yes_no_dontknow(group[col])
+                pct_yes, pct_dont_know, n = interview_wandb.pct_yes_no_dontknow(group[col])
                 per_party_runs.setdefault(party, []).append(
                     {"pct_yes": pct_yes, "pct_dont_know": pct_dont_know, "n": n}
                 )
@@ -307,7 +307,7 @@ def aggregate_interview_runs(
             if recognized_col not in df.columns:
                 continue
             for party, group in df.groupby("party"):
-                pct_recognized, mean_rating, n = _pct_recognized_and_rating(
+                pct_recognized, mean_rating, n = interview_wandb.pct_recognized_and_rating(
                     group[recognized_col], group[rating_col]
                 )
                 per_party_runs.setdefault(party, []).append(
@@ -339,61 +339,153 @@ def aggregate_interview_runs(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Interview personas and plot yes/no + feeling-thermometer results by party.")
+    parser = argparse.ArgumentParser(
+        description="Interview personas (with real or obfuscated Trump/Biden/party labels, "
+                     "inferred from the personas file name) and plot yes/no + feeling-thermometer "
+                     "results by party."
+    )
     parser.add_argument("--personas_setting", type=str,
-                         default="20260123_personas_with_bio_2000_noLoveHate_noPartyId_",
-                         help="Name (without .json) of the personas file in src/ to interview.")
+                         default="20260720_personas_with_bio_2000_noExtendWithAi_",
+                         help="Name (without .json) of the personas file in src/ to interview. "
+                              "The obfuscation condition (Neutral/Nonce/RandomReal/RandomNonce) is "
+                              "inferred from this name's suffix.")
     parser.add_argument("--model", type=str, default="gpt-4o-mini",
                          help="OpenRouter model id used to answer as each persona.")
     parser.add_argument("--persona_sample", type=int, default=None,
                          help="Number of personas to randomly sample; omit to interview all personas.")
     parser.add_argument("--seed", type=int, nargs="+", default=[42],
                          help="One or more random seeds used when --persona_sample is set. "
-                              "With multiple seeds, the interview is run once per seed and "
-                              "the per-party results are averaged (mean ± std) across runs "
-                              "instead of writing raw per-persona rows.")
+                              "Each seed is run and logged to wandb as its own run "
+                              "(sharing a common wandb group); aggregation across seeds "
+                              "happens on the analysis side, reading back from wandb.")
+    parser.add_argument("--wandb_project", type=str, default=interview_wandb.WANDB_PROJECT,
+                         help="Wandb project to log interview runs to.")
+    parser.add_argument("--no_log", action="store_true", default=False,
+                         help="Skip wandb logging entirely (e.g. for local debugging runs).")
+    parser.add_argument("--include_group_context", action="store_true", default=False,
+                         help="Prepend a short paragraph to each persona's system message naming "
+                              "the two rival political affiliations and their leader (see "
+                              "build_group_context). Applied in every obfuscation condition, "
+                              "including 'none', so it stays the only thing that's off by default "
+                              "rather than a confound between conditions.")
     return parser.parse_args()
+
+
+def run_interview_for_setting(
+    personas_setting: str,
+    model: str,
+    persona_sample: int | None,
+    seeds: list[int],
+    wandb_group: str | None = None,
+    extra_config: dict | None = None,
+    log: bool = True,
+    wandb_project: str = interview_wandb.WANDB_PROJECT,
+    include_group_context: bool = False,
+) -> dict:
+    """Interview the personas in src/<personas_setting>.json, once per seed, logging
+    each seed's raw per-persona results to wandb as its own run (all sharing one
+    wandb group/batch id). Aggregation across seeds is done later, on the analysis
+    side, by reading the runs back from wandb. Returns identifying info about the
+    runs that were logged."""
+
+    trump_label, biden_label = get_political_figure_labels(personas_setting)
+    democrats_label, republicans_label = get_party_labels(personas_setting)
+    questions = build_questions(trump_label, biden_label, democrats_label, republicans_label)
+    thermometer_targets = build_thermometer_targets(trump_label, biden_label, democrats_label, republicans_label)
+
+    personas_file = os.path.join(os.path.dirname(__file__), f"../../src/{personas_setting}.json")
+
+    obfuscation = (extra_config or {}).get("obfuscation") or _infer_obfuscation(personas_setting)
+    # When enabled, applied in every condition, including "none" — the
+    # label-recognition problem this solves is specific to obfuscation, but
+    # injecting it unconditionally keeps every condition's prompt structure
+    # identical except for the labels themselves, so obfuscation stays the only
+    # manipulated variable.
+    group_context = (
+        build_group_context(trump_label, biden_label, democrats_label, republicans_label)
+        if include_group_context else ""
+    )
+    base_config = {
+        "obfuscation": obfuscation,
+        "personas_setting": personas_setting,
+        "model": model,
+        "persona_sample": persona_sample,
+        "num_seeds_in_batch": len(seeds),
+        "trump_label": trump_label,
+        "biden_label": biden_label,
+        "democrats_label": democrats_label,
+        "republicans_label": republicans_label,
+        "include_group_context": include_group_context,
+        "group_context": group_context,
+    }
+    if extra_config:
+        base_config.update(extra_config)
+
+    group = wandb_group or uuid.uuid4().hex[:8]
+    run_ids = []
+
+    if persona_sample is None and len(seeds) > 1:
+        print("Note: --persona_sample not set, so each seed re-interviews the full "
+              "population; comparing seeds captures run-to-run LLM variability rather "
+              "than sampling variance.")
+
+    for i, seed in enumerate(seeds):
+        print(f"=== Seed {i + 1}/{len(seeds)} (seed={seed}) ===")
+
+        if log:
+            run = wandb.init(
+                project=wandb_project,
+                group=group,
+                job_type="interview",
+                tags=[obfuscation],
+                name=f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{obfuscation}_seed{seed}",
+                config={**base_config, "interview_seed": seed},
+                reinit=True,
+            )
+
+        df = interview_personas(
+            personas_file=personas_file,
+            questions=questions,
+            thermometer_targets=thermometer_targets,
+            model=model,
+            persona_sample=persona_sample,
+            seed=seed,
+            group_context=group_context,
+        )
+
+        if log:
+            interview_wandb.upload_results_artifact(df, name=f"interview-results-{obfuscation}-seed{seed}")
+            metrics = interview_wandb.persona_population_metrics(df)
+            metrics.update(interview_wandb.result_metrics(df, questions, thermometer_targets))
+            # In addition to the downloadable CSV artifact above, log the same
+            # per-persona rows (individual answers + explanations) as a wandb
+            # Table, so they're browsable/sortable/filterable in the run's UI
+            # without downloading anything. wandb.Table requires one consistent
+            # type per column, but `{key}_answer` columns mix True/False/
+            # "dont_know"/None, so stringify a copy just for the table view (the
+            # CSV artifact above keeps the original values for programmatic use).
+            table_df = df.copy()
+            answer_cols = [c for c in table_df.columns if c.endswith("_answer")]
+            table_df[answer_cols] = table_df[answer_cols].astype(str)
+            metrics["interview_results_table"] = wandb.Table(dataframe=table_df)
+            wandb.log(metrics)
+            run_ids.append(run.id)
+            wandb.finish()
+
+    if log:
+        print(f"Logged {len(seeds)} run(s) to wandb project '{wandb_project}' (group={group})")
+
+    return {"group": group, "obfuscation": obfuscation, "run_ids": run_ids}
 
 
 def main() -> None:
     args = parse_args()
-    personas_setting = args.personas_setting
-    sample_suffix = f"_sample{args.persona_sample}" if args.persona_sample else ""
-    seed_suffix = f"_avg{len(args.seed)}seeds" if len(args.seed) > 1 else ""
-
-    personas_file = os.path.join(os.path.dirname(__file__), f"../../src/{personas_setting}.json")
-    output_file   = os.path.join(os.path.dirname(__file__), "results", f"persona_interview_results_{personas_setting}{sample_suffix}{seed_suffix}.csv")
-
-    if len(args.seed) == 1:
-        df = interview_personas(
-            personas_file=personas_file,
-            output_file=output_file,
-            questions=QUESTIONS,
-            thermometer_targets=THERMOMETER_TARGETS,
-            model=args.model,
-            persona_sample=args.persona_sample,
-            seed=args.seed[0],
-        )
-    else:
-        if args.persona_sample is None:
-            print("Note: --persona_sample not set, so each seed re-interviews the full "
-                  "population; averaging captures run-to-run LLM variability rather than "
-                  "sampling variance.")
-        dfs = []
-        for i, seed in enumerate(args.seed):
-            print(f"=== Seed {i + 1}/{len(args.seed)} (seed={seed}) ===")
-            dfs.append(interview_personas(
-                personas_file=personas_file,
-                output_file=None,
-                questions=QUESTIONS,
-                thermometer_targets=THERMOMETER_TARGETS,
-                model=args.model,
-                persona_sample=args.persona_sample,
-                seed=seed,
-            ))
-        df = aggregate_interview_runs(dfs, QUESTIONS, THERMOMETER_TARGETS)
-        df.to_csv(output_file, index=False)
-        print(f"Averaged results across {len(args.seed)} seeds saved to {output_file}")
+    result = run_interview_for_setting(
+        args.personas_setting, args.model, args.persona_sample, args.seed,
+        log=not args.no_log, wandb_project=args.wandb_project,
+        include_group_context=args.include_group_context,
+    )
+    print(result)
 
 
 if __name__ == "__main__":

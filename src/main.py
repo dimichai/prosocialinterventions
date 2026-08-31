@@ -164,18 +164,19 @@ def select_users(persona_path, n, personas=None):
     users = personas if personas is not None else json.load(open(persona_path, 'r'))
     return random.sample(users, min(n, len(users)))
 
-def get_persona_label(personas_file, no_personas, no_bio):
+def get_persona_label(personas_file, hide_own_persona, hide_target_bio):
     """
     Label used for the wandb run name/config and the results directory.
-    When --no_personas/--no_bio are set, the persona file's identity no longer
-    describes the run, so the label reflects the ablation instead of the filename.
+    When --hide_own_persona/--hide_target_bio are set, the persona file's identity
+    no longer describes the run, so the label reflects the ablation instead of the
+    filename.
     """
-    if no_personas and no_bio:
-        return "no_personas_no_bio"
-    elif no_personas:
-        return "no_personas"
-    elif no_bio:
-        return "no_bio"
+    if hide_own_persona and hide_target_bio:
+        return "hide_own_persona_hide_target_bio"
+    elif hide_own_persona:
+        return "hide_own_persona"
+    elif hide_target_bio:
+        return "hide_target_bio"
     return personas_file
 
 def run_simulation(simulation_size = 500, simulation_steps = 10000,
@@ -191,16 +192,16 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
                 openrouter_api_key = None,
                 log = True,
                 own_wandb_run = True,
-                no_personas = False,
-                no_bio = False,
-                no_news_category = False,
+                hide_own_persona = False,
+                hide_target_bio = False,
+                hide_news_category = False,
                 wandb_project = "prosocial-interventions",
                 include_group_context = False):
 
     if seed is not None:
         random.seed(seed)
 
-    persona_label = get_persona_label(personas_file, no_personas, no_bio)
+    persona_label = get_persona_label(personas_file, hide_own_persona, hide_target_bio)
     obfuscation = infer_obfuscation(personas_file)
     group_context = (
         build_group_context(*get_political_figure_labels(personas_file), *get_party_labels(personas_file))
@@ -225,9 +226,9 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
                 "bio_love_hate_lists": 'noLoveHate' not in personas_file and 'noBioLoveHate' not in personas_file,
                 "bio_party_id": 'noPartyId' not in personas_file and 'noBioPartyId' not in personas_file,
                 "bio_voted2020": 'noVoted2020' not in personas_file and 'noBioVoted2020' not in personas_file,
-                "no_personas": no_personas,
-                "no_bio": no_bio,
-                "no_news_category": no_news_category,
+                "hide_own_persona": hide_own_persona,
+                "hide_target_bio": hide_target_bio,
+                "hide_news_category": hide_news_category,
                 "obfuscation": obfuscation,
                 "include_group_context": include_group_context,
                 "group_context": group_context,
@@ -269,7 +270,7 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
         )
 
     # Register users
-    [platform.register_user(Agent(model, user, no_personas=no_personas, no_bio=no_bio, no_news_category=no_news_category, group_context=group_context)) for user in selected_users]
+    [platform.register_user(Agent(model, user, hide_own_persona=hide_own_persona, hide_target_bio=hide_target_bio, hide_news_category=hide_news_category, group_context=group_context)) for user in selected_users]
     platform.set_client(client)
     
     for i in range(simulation_steps):
@@ -340,9 +341,9 @@ if __name__ == "__main__":
     argparser.add_argument("--simulation_size", type=int, default=500, help="Number of users in the simulation")
     argparser.add_argument("--simulation_steps", type=int, default=5000, help="Number of steps to run the simulation for")
     argparser.add_argument('--no_log', action='store_true', default=False)
-    argparser.add_argument('--no_personas', action='store_true', default=False, help="Omit the persona description from the agent's system prompt (neutral-agent baseline)")
-    argparser.add_argument('--no_bio', action='store_true', default=False, help="Omit the target user's bio when an agent decides whether to follow them")
-    argparser.add_argument('--no_news_category', action='store_true', default=False, help="Omit the news category when an agent decides which news to share")
+    argparser.add_argument('--hide_own_persona', action='store_true', default=False, help="Omit the persona description from the agent's system prompt (neutral-agent baseline)")
+    argparser.add_argument('--hide_target_bio', action='store_true', default=False, help="Omit the target user's bio when an agent decides whether to follow them")
+    argparser.add_argument('--hide_news_category', action='store_true', default=False, help="Omit the news category when an agent decides which news to share")
     argparser.add_argument("--wandb_project", type=str, default="prosocial-interventions", help="Wandb project to log the run to")
     argparser.add_argument("--include_group_context", action="store_true", default=False,
         help="Prepend a short paragraph to each persona's system message naming the two "
@@ -352,7 +353,7 @@ if __name__ == "__main__":
 
     args = argparser.parse_args()
 
-    persona_label = get_persona_label(args.personas_file, args.no_personas, args.no_bio)
+    persona_label = get_persona_label(args.personas_file, args.hide_own_persona, args.hide_target_bio)
     sim_path = f"{persona_label}_{args.user_link_strategy}_{args.timeline_select_strategy}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     print(f"Running simulation {sim_path}...")
 
@@ -367,9 +368,9 @@ if __name__ == "__main__":
         personas_file=args.personas_file,
         openrouter_api_key=args.openrouter_api_key,
         log = not args.no_log,
-        no_personas=args.no_personas,
-        no_bio=args.no_bio,
-        no_news_category=args.no_news_category,
+        hide_own_persona=args.hide_own_persona,
+        hide_target_bio=args.hide_target_bio,
+        hide_news_category=args.hide_news_category,
         wandb_project=args.wandb_project,
         include_group_context=args.include_group_context
     )

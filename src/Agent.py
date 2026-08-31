@@ -20,12 +20,12 @@ class BooleanAction(BaseModel):
 
 class Agent():
 
-    def __init__(self, model: str, persona: dict = None, no_personas: bool = False, no_bio: bool = False, no_news_category: bool = False, group_context: str = ""):
+    def __init__(self, model: str, persona: dict = None, hide_own_persona: bool = False, hide_target_bio: bool = False, hide_news_category: bool = False, group_context: str = ""):
 
         self.persona = persona
-        self.no_personas = no_personas
-        self.no_bio = no_bio
-        self.no_news_category = no_news_category
+        self.hide_own_persona = hide_own_persona
+        self.hide_target_bio = hide_target_bio
+        self.hide_news_category = hide_news_category
         self.group_context = group_context
 
         self.llm = None
@@ -58,7 +58,7 @@ class Agent():
         Generate a system message to introduce the agent to the system and its persona.
         """
 
-        persona_section = "" if self.no_personas else f"\nHere is a description of your persona:\n{self.persona['persona']}"
+        persona_section = "" if self.hide_own_persona else f"\nHere is a description of your persona:\n{self.persona['persona']}"
         message = P.AGENT_SYSTEM_MESSAGE.format(persona_section=persona_section)
         if self.group_context:
             message += f"\n\n{self.group_context}"
@@ -153,7 +153,7 @@ class Agent():
             post_content=post_content,
             user_id=other_agent.identifier,
             follower_count_line=f"Followers: {other_agent.followers}\n" if use_follower_count else "",
-            bio_line=f"Bio: {other_agent.persona['biography']}\n" if use_bio and not self.no_bio else "",
+            bio_line=f"Bio: {other_agent.persona['biography']}\n" if use_bio and not self.hide_target_bio else "",
             recent_posts=recent_posts,
         )
 
@@ -179,7 +179,7 @@ class Agent():
         msg += P.PERFORM_ACTION_NEWS_HEADER
 
         for i, news_item in enumerate(news_data, start=1):
-            category_line = "" if self.no_news_category else f"Category: {news_item['category']}\n"
+            category_line = "" if self.hide_news_category else f"Category: {news_item['category']}\n"
             msg += f"ID: {i}\nTitle: {news_item['headline']}\n{category_line}Description: {news_item['short_description']}\n\n"
 
         # Get response and handle the action

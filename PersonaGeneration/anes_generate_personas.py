@@ -69,7 +69,7 @@ def obf(value, mapping):
 
 
 # This code fetches lines from the ANES, and returns as readable dict
-def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=False, ignore_voted2020=False, ignore_voted2020_year=False, ignore_age=False, ignore_ideology=False, ignore_political_behaviour=False, ignore_leisure=False, ignore_problems=False, ignore_religion=False, ignore_state=False, obfuscation='none', seed=42):
+def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=False, ignore_voted2020=False, ignore_voted2020_year=False, ignore_age=False, ignore_ideology=False, ignore_political_behaviour=False, ignore_leisure=False, ignore_problems=False, ignore_religion=False, ignore_state=False, obfuscation='none', seed=42, inject_soccer_statement=False):
 
     obfuscation_map = load_obfuscation_map(obfuscation)
 
@@ -725,6 +725,21 @@ def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=Fal
 
         res.append(l)
 
+    # Saliency-check manipulation: inject an apolitical "You love/hate soccer."
+    # statement, balanced exactly 50/50 within each party group and independent of
+    # everything else, so it can be used to check whether persona statements are
+    # actually reflected downstream.
+    if inject_soccer_statement:
+        for party in ('Democrat', 'Republican', 'Non-partisan'):
+            group = [l for l in res if l['party'] == party]
+            random.shuffle(group)
+            half = len(group) // 2
+            for l in group[:half]:
+                l['persona'] += obf('You love soccer.', obfuscation_map) + '\n'
+                l['inject_soccer_statement'] = 'love'
+            for l in group[half:]:
+                l['persona'] += obf('You hate soccer.', obfuscation_map) + '\n'
+                l['inject_soccer_statement'] = 'hate'
 
     return res
 
@@ -816,6 +831,7 @@ def build_argparser() -> argparse.ArgumentParser:
     argparser.add_argument("--ignore_bio_party_identity", action='store_true', default=False, help="Whether to ignore party identity info in bio")
     argparser.add_argument("--ignore_bio_voted2020", action='store_true', default=False, help="Whether to ignore voted2020 info in bio")
     argparser.add_argument("--obfuscation", choices=['none', 'neutral', 'nonce', 'randomreal', 'randomnonce'], default='none', help="Obfuscate identifying terms in the persona text: none (as-is), neutral (generic labels), nonce (meaningless tokens), randomreal (random real terms), randomnonce (random meaningless tokens)")
+    argparser.add_argument("--inject_soccer_statement", action='store_true', default=False, help="Saliency check: inject an apolitical 'You love/hate soccer.' statement into every persona, balanced 50/50 within each party group")
     argparser.add_argument("--seed", type=int, default=42, help="Random seed for persona sampling and AI extension choices")
     argparser.add_argument("--llm_model", type=str, default="gpt-4o-mini", help="OpenAI model used for AI-extended occupation/hobbies and the biography")
     return argparser
@@ -847,7 +863,8 @@ def sample_personas(args: argparse.Namespace) -> list[dict]:
                             ignore_religion=args.ignore_religion,
                             ignore_state=ignore_state,
                             obfuscation=args.obfuscation,
-                            seed=args.seed)
+                            seed=args.seed,
+                            inject_soccer_statement=args.inject_soccer_statement)
 
 
 def enrich_personas(

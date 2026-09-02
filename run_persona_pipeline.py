@@ -107,6 +107,12 @@ def parse_args() -> argparse.Namespace:
                          help="Obfuscation condition for this invocation — one "
                               "condition per invocation; run the script again per "
                               "condition to compare them.")
+    parser.add_argument("--inject_soccer_statement", action="store_true", default=False,
+                         help="Saliency check: inject an apolitical 'You love/hate "
+                              "soccer.' statement into every persona, balanced 50/50 "
+                              "within each party group (Democrat/Republican/"
+                              "Non-partisan), independent of everything else. "
+                              "Disabled by default.")
     parser.add_argument("--seeds", type=int, nargs="+", default=[42],
                          help="One seed per full generate->interview->simulate cycle. "
                               "Each seed drives every stage's randomness and is its "
@@ -216,6 +222,7 @@ def main() -> None:
                     # `group` value itself, so this is what makes it usable there.
                     "batch_id": batch_id,
                     "obfuscation": args.obfuscation,
+                    "inject_soccer_statement": args.inject_soccer_statement,
                     "ablations": args.ablations,
                     "experiment_label": args.experiment_label,
                     "num_personas": args.num_personas,
@@ -243,6 +250,7 @@ def main() -> None:
             obfuscation=args.obfuscation,
             seed=seed,
             minimal_persona=False,
+            inject_soccer_statement=args.inject_soccer_statement,
             **ablation_flags,
         )
         personas = anes_generate_personas.sample_personas(gen_args)

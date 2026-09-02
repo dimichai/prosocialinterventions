@@ -10,7 +10,7 @@ from typing import Literal
 import dotenv
 import pandas as pd
 import wandb
-from openai import OpenAI, LengthFinishReasonError
+from openai import OpenAI, LengthFinishReasonError, ContentFilterFinishReasonError
 from pydantic import BaseModel, ValidationError
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
@@ -126,8 +126,13 @@ def ask_question(
             # SDK doesn't treat as an API error — it crashes iterating `None`
             # instead. Treat it like a truncated response: retry, then give up.
             print(f"    [warn] [id={persona.get('persona_index')}] malformed response (no choices) on attempt {attempt + 1} for question: {question!r}")
+        except ContentFilterFinishReasonError:
+            # Some persona/question combinations (e.g. under obfuscation="randomreal",
+            # which names real public figures) trip the provider's content filter.
+            # Skip this one question rather than aborting the whole run.
+            print(f"    [warn] [id={persona.get('persona_index')}] content filter rejected response on attempt {attempt + 1} for question: {question!r}")
 
-    return None, "ERROR: response truncated or malformed after retry"
+    return None, "ERROR: response truncated, malformed, or content-filtered after retry"
 
 
 def ask_feeling_thermometer_single(
@@ -160,6 +165,8 @@ def ask_feeling_thermometer_single(
             print(f"    [warn] [id={persona.get('persona_index')}] truncated thermometer response on attempt {attempt + 1} for {label!r}")
         except TypeError:
             print(f"    [warn] [id={persona.get('persona_index')}] malformed thermometer response (no choices) on attempt {attempt + 1} for {label!r}")
+        except ContentFilterFinishReasonError:
+            print(f"    [warn] [id={persona.get('persona_index')}] content filter rejected thermometer response on attempt {attempt + 1} for {label!r}")
 
     return None, None
 

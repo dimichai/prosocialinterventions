@@ -120,8 +120,14 @@ def ask_question(
             # finish_reason="length", so the SDK doesn't raise LengthFinishReasonError
             # and instead fails to parse the incomplete JSON (ValidationError).
             print(f"    [warn] [id={persona.get('persona_index')}] truncated response on attempt {attempt + 1} for question: {question!r}")
+        except TypeError:
+            # OpenRouter occasionally returns a 200 response with no `choices`
+            # (e.g. on upstream rate limits/outages/credit exhaustion), which the
+            # SDK doesn't treat as an API error — it crashes iterating `None`
+            # instead. Treat it like a truncated response: retry, then give up.
+            print(f"    [warn] [id={persona.get('persona_index')}] malformed response (no choices) on attempt {attempt + 1} for question: {question!r}")
 
-    return None, "ERROR: response truncated (length limit reached) after retry"
+    return None, "ERROR: response truncated or malformed after retry"
 
 
 def ask_feeling_thermometer_single(
@@ -152,6 +158,8 @@ def ask_feeling_thermometer_single(
             return parsed.recognized, parsed.rating
         except (LengthFinishReasonError, ValidationError):
             print(f"    [warn] [id={persona.get('persona_index')}] truncated thermometer response on attempt {attempt + 1} for {label!r}")
+        except TypeError:
+            print(f"    [warn] [id={persona.get('persona_index')}] malformed thermometer response (no choices) on attempt {attempt + 1} for {label!r}")
 
     return None, None
 
@@ -180,15 +188,19 @@ def interview_personas(
     persona_sample: int | None = None,
     seed: int = 42,
     group_context: str = "",
+    openrouter_api_key: int | None = None,
 ) -> pd.DataFrame:
     """Interview either an in-memory `personas` list, or (when not given) the
-    personas loaded from `personas_file`."""
+    personas loaded from `personas_file`.
+
+    `openrouter_api_key` selects which of OPENROUTER_API_KEY_{1,2,3} to use
+    (defaults to 1), so parallel runs can be spread across separate keys."""
 
     dotenv.load_dotenv(os.path.join(os.path.dirname(__file__), "../../.env"))
 
     client = OpenAI(
         base_url="https://openrouter.ai/api/v1",
-        api_key=os.getenv("OPENROUTER_API_KEY_1"),
+        api_key=os.getenv(f"OPENROUTER_API_KEY_{openrouter_api_key or 1}"),
     )
 
     if personas is None:
@@ -387,6 +399,7 @@ def run_interview_for_setting(
     include_group_context: bool = False,
     personas: list[dict] | None = None,
     own_wandb_run: bool = True,
+    openrouter_api_key: int | None = None,
 ) -> dict:
     """Interview personas, once per seed, logging each seed's raw per-persona results
     to wandb. `personas_setting` is always required (even when `personas` is supplied
@@ -469,6 +482,7 @@ def run_interview_for_setting(
             persona_sample=persona_sample,
             seed=seed,
             group_context=group_context,
+            openrouter_api_key=openrouter_api_key,
         )
 
         if log:

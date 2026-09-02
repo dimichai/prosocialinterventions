@@ -272,6 +272,7 @@ def main() -> None:
                 include_group_context=args.include_group_context,
                 personas=personas,
                 own_wandb_run=False,
+                openrouter_api_key=args.openrouter_api_key,
             )
         else:
             print("Skipping interview stage.")

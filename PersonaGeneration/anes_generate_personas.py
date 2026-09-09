@@ -529,6 +529,11 @@ def get_anes_rows(number_rows, ignore_love_hate=False, ignore_party_identity=Fal
         
         l['feelingDemocratic'] = d['feelingDemocratic']
         l['feelingRepublican'] = d['feelingRepublican']
+        # Raw ANES candidate thermometer ratings (V201151/V201152) — otherwise
+        # only used transiently below to build loveList/hateList and discarded;
+        # kept here too as ground truth for Biden/Trump interview comparisons.
+        l['feelingBiden'] = d['V201151']
+        l['feelingTrump'] = d['V201152']
 
         l['liberalConservative'] = d['liberalConservative']
         # Normalize the twitter use variable: 

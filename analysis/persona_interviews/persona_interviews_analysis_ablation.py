@@ -14,36 +14,50 @@ from interview_comparison_plots import (  # noqa: E402
     QUESTIONS,
     fig_path,
     aggregate_population_metrics,
+    aggregate_ground_truth_thermometer,
     print_population_table,
     print_question_tables,
-    plot_metric_comparison,
-    plot_thermometer_comparison,
+    plot_slope_comparison,
+    party_color_map,
 )
 
-# Colorblind-validated categorical palette (fixed order, not cycled while it lasts);
-# ablation combos are an open-ended set (unlike obfuscation's fixed 5), so this is
-# extended by repeating if a batch has more conditions than colors.
-CONDITION_PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#7d5ba6", "#4c6663", "#c1666b"]
+
+# Human-readable labels for the additive AP/PID/VB ablation chain (see
+# run_persona_pipeline.py's --ablations). Combos not listed here (e.g. an
+# ablation batch outside this chain) fall back to a generic "+"-joined label.
+CUSTOM_ABLATION_LABELS = {
+    ("extend_with_ai",): "Full Persona",
+    ("extend_with_ai", "love_hate"): "No AP",
+    ("extend_with_ai", "love_hate", "party_identity"): "No AP & PID",
+    ("extend_with_ai", "love_hate", "party_identity", "voted2020"): "No AP & PID & VB",
+}
 
 
 def ablation_label(ablations: tuple[str, ...]) -> str:
-    """Display label for one ablation combo — 'None' for the baseline (no
-    ablations), else the sorted ablation names joined with '+'."""
+    """Display label for one ablation combo — a fixed label for recognized
+    combos (see CUSTOM_ABLATION_LABELS), else 'None' for the baseline (no
+    ablations) or the sorted ablation names joined with '+'."""
+    if ablations in CUSTOM_ABLATION_LABELS:
+        return CUSTOM_ABLATION_LABELS[ablations]
     return "None" if not ablations else "+".join(ablations)
 
 
 def fetch_condition_dfs(
-    batch_id: str, wandb_project: str = interview_wandb.WANDB_PROJECT
-) -> tuple[dict[str, pd.DataFrame], dict[str, dict[str, tuple[float, float]]]]:
+    batch_id: str, wandb_project: str = 'persona-simulation'
+) -> tuple[dict[str, pd.DataFrame], dict[str, dict[str, tuple[float, float]]], dict[str, dict[str, tuple[float, float]]]]:
     """Fetch every wandb run sharing `batch_id` (one run per ablation-combo x seed —
     run_persona_pipeline.py's --ablations is one additive combo per invocation, so
     pass the same --batch_id across multiple invocations, one per combo, to populate
     a batch spanning more than one). Download each run's raw per-persona results, and
     aggregate across seeds within each ablation combo.
 
-    Returns (dfs, population), where `dfs` maps condition label -> aggregated
-    question/thermometer results and `population` maps condition label -> aggregated
-    persona-population attribute stats (see `aggregate_population_metrics`)."""
+    Returns (dfs, population, ground_truth), where `dfs` maps condition label ->
+    aggregated question/thermometer results, `population` maps condition label ->
+    aggregated persona-population attribute stats (see `aggregate_population_metrics`),
+    and `ground_truth` maps thermometer role -> party -> (value, 95%-CI half-width)
+    of real ANES respondents' own rating (see `aggregate_ground_truth_thermometer`,
+    which computes the CI across seeds) — computed once, from the
+    baseline combo, since it's identical across ablation conditions sharing a seed."""
     runs = interview_wandb.fetch_runs_by_group(wandb_project, batch_id)
     if not runs:
         raise RuntimeError(f"No wandb runs found in project '{wandb_project}' for group '{batch_id}'.")
@@ -57,6 +71,7 @@ def fetch_condition_dfs(
 
     dfs = {}
     population = {}
+    ground_truth = None
     for combo in ordered_combos:
         condition_runs = runs_by_ablations[combo]
         label = ablation_label(combo)
@@ -70,8 +85,10 @@ def fetch_condition_dfs(
         )
         dfs[label] = interview.aggregate_interview_runs(raw_dfs, questions, thermometer_targets)
         population[label] = aggregate_population_metrics(raw_dfs)
+        if ground_truth is None:
+            ground_truth = aggregate_ground_truth_thermometer(raw_dfs)
 
-    return dfs, population
+    return dfs, population, ground_truth
 
 
 def parse_args() -> argparse.Namespace:
@@ -84,14 +101,14 @@ def parse_args() -> argparse.Namespace:
                               "(printed by run_persona_pipeline.py after it finishes — "
                               "pass the same --batch_id across multiple invocations, "
                               "one per --ablations combo, to populate this batch).")
-    parser.add_argument("--wandb_project", type=str, default=interview_wandb.WANDB_PROJECT,
+    parser.add_argument("--wandb_project", type=str, default='persona-simulation',
                          help="Wandb project the runs were logged to.")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    dfs, population = fetch_condition_dfs(args.batch_id, wandb_project=args.wandb_project)
+    dfs, population, ground_truth = fetch_condition_dfs(args.batch_id, wandb_project=args.wandb_project)
 
     print_population_table(population)
 
@@ -132,28 +149,43 @@ def main() -> None:
     all_keys = follow_keys + trait_keys
 
     all_parties = sorted(set().union(*[set(df["party"].dropna().unique()) for df in dfs.values()]))
-    labels      = list(dfs.keys())
 
-    condition_colors = {l: CONDITION_PALETTE[i % len(CONDITION_PALETTE)] for i, l in enumerate(labels)}
+    party_colors = party_color_map(all_parties)
 
-    # Ablation combos aren't a strict nested/cumulative chain in general (any subset
-    # can be combined), so — same reasoning as the obfuscation comparison — a
-    # grouped bar chart per condition is the honest comparison rather than a line
-    # chart implying an ordering that isn't guaranteed to exist.
-    plot_metric_comparison(dfs, follow_present, all_parties, condition_colors,
-                            fig_path("interview_results_ablation", args.batch_id), "question", "pct_yes_mean", "pct_yes_std",
-                            ncols=3)
-    plot_metric_comparison(dfs, trait_present, all_parties, condition_colors,
-                            fig_path("interview_results_ablation_traits", args.batch_id), "question", "pct_yes_mean", "pct_yes_std",
-                            ncols=2, show_dont_know=True)
+    plot_slope_comparison(dfs, follow_present, all_parties, party_colors,
+                           fig_path("interview_results_ablation", args.batch_id),
+                           "question", "pct_yes_mean", "pct_yes_std", ncols=3)
+    plot_slope_comparison(dfs, trait_present, all_parties, party_colors,
+                           fig_path("interview_results_ablation_traits", args.batch_id),
+                           "question", "pct_yes_mean", "pct_yes_std", ncols=2)
+    # Don't-know rate as its own chart, rather than annotated on the yes-rate
+    # panels, so forced-choice artifacts (respondents with no basis to judge a
+    # party) are visible instead of defaulting into the "No" line.
+    plot_slope_comparison(dfs, trait_present, all_parties, party_colors,
+                           fig_path("interview_results_ablation_traits_dont_know", args.batch_id),
+                           "question", "pct_dont_know_mean", "pct_dont_know_std", ncols=2,
+                           value_label='Fraction answering "don\'t know"')
 
     print(f"\n{'='*60}")
     print("  Question answers (rows = ablation condition, columns = party)")
     print(f"{'='*60}")
     print_question_tables(dfs, all_keys, all_parties, question_labels, question_texts, trait_keys)
 
-    plot_thermometer_comparison(dfs, all_parties, condition_colors,
-                                 fig_path("interview_results_ablation_thermometer", args.batch_id))
+    therm_roles = [
+        ("democrats", "Feeling thermometer:\nDemocrats"),
+        ("biden", "Feeling thermometer:\nBiden"),
+        ("republicans", "Feeling thermometer:\nRepublicans"),
+        ("trump", "Feeling thermometer:\nTrump"),
+    ]
+    therm_present = [
+        (role, title) for role, title in therm_roles
+        if all(((df["metric"] == "thermometer") & (df["key"] == role)).any() for df in dfs.values())
+    ]
+    plot_slope_comparison(dfs, therm_present, all_parties, party_colors,
+                           fig_path("interview_results_ablation_thermometer", args.batch_id),
+                           "thermometer", "rating_mean", "rating_std", ncols=4,
+                           value_label="Mean rating (0-100)", ylim=(0, 100),
+                           ground_truth=ground_truth)
 
 
 if __name__ == "__main__":

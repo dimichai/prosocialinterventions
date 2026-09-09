@@ -97,6 +97,24 @@ LEADER_THERM_ROLES = {
     "Republican": ("trump", "biden"),
 }
 
+PARTY_COLORS = {"Democrat": "#03357D", "Non-partisan": "#888888", "Republican": "#D50403"}
+_PARTY_COLOR_FALLBACK = ["#58508D", "#FFA600", "#2D7D2D", "#eda100"]
+
+
+def party_color_map(all_parties: list[str]) -> dict[str, str]:
+    """Party -> line color for slope charts, matching the old ablation-script
+    palette (blue Democrat / red Republican / gray Non-partisan); any other
+    party label falls back to a fixed extra palette."""
+    colors, i = {}, 0
+    for p in all_parties:
+        if p in PARTY_COLORS:
+            colors[p] = PARTY_COLORS[p]
+        else:
+            colors[p] = _PARTY_COLOR_FALLBACK[i % len(_PARTY_COLOR_FALLBACK)]
+            i += 1
+    return colors
+
+
 FIGS_DIR = os.path.join(os.path.dirname(__file__), "figs")
 
 
@@ -136,6 +154,34 @@ def aggregate_population_metrics(raw_dfs: list[pd.DataFrame]) -> dict[str, tuple
         mean = values.mean()
         err = 1.96 * values.std() / math.sqrt(n) if n > 1 else float("nan")
         result[key] = (mean, err)
+    return result
+
+
+def aggregate_ground_truth_thermometer(raw_dfs: list[pd.DataFrame]) -> dict[str, dict[str, tuple[float, float]]]:
+    """Mean and 95%-CI half-width (`1.96 * std / sqrt(n_seeds)`, same convention
+    as aggregate_population_metrics/_lookup) of
+    interview_wandb.ground_truth_thermometer_by_party across seeds. Each seed
+    draws an independent resample of ANES respondents (see
+    anes_generate_personas.py::get_anes_rows, `df1.sample(..., replace=True,
+    random_state=seed)`), so the ground-truth mean itself carries seed-to-seed
+    sampling variance, same as the LLM-answer lines it's compared against.
+    Ground truth is identical across ablation conditions sharing a seed (a
+    property of the real respondent, unaffected by what's redacted from their
+    LLM persona), so callers only need to compute this once per batch, from
+    any one condition's raw_dfs (see fetch_condition_dfs) — as long as every
+    condition in the batch was run with the same seed(s)."""
+    per_seed = [interview_wandb.ground_truth_thermometer_by_party(df) for df in raw_dfs]
+    roles = set().union(*[m.keys() for m in per_seed])
+    result = {}
+    for role in roles:
+        parties = set().union(*[m.get(role, {}).keys() for m in per_seed])
+        result[role] = {}
+        for party in parties:
+            values = pd.Series([m.get(role, {}).get(party, float("nan")) for m in per_seed], dtype=float)
+            n = int(values.notna().sum())
+            mean = values.mean()
+            err = 1.96 * values.std() / math.sqrt(n) if n > 1 else float("nan")
+            result[role][party] = (mean, err)
     return result
 
 
@@ -367,7 +413,7 @@ def _draw_table_panel(
                         va="center", fontsize=7)
 
 
-MAX_GRID_COLS = 3
+MAX_GRID_COLS = 4
 
 # Row labels (condition names, drawn inside each panel by _draw_table_panel)
 # already identify color/condition, so no legend is needed.
@@ -434,6 +480,96 @@ def plot_metric_comparison(
                            secondary_fn=secondary_fn, secondary_prefix="dk")
 
     fig.text(0.01, 0.5, value_label, va="center", rotation="vertical", fontsize=10, color="#555555")
+    fig.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
+    fig.savefig(output_path.replace('.pdf', '.png'), dpi=300, bbox_inches='tight', facecolor='white')
+    plt.close(fig)
+    print(f"Saved to {output_path}")
+
+
+def plot_slope_comparison(
+    dfs: dict[str, pd.DataFrame],
+    keys: list[tuple[str, str]],
+    all_parties: list[str],
+    party_colors: dict[str, str],
+    output_path: str,
+    metric: str,
+    value_col: str,
+    std_col: str,
+    ncols: int | None = None,
+    value_label: str = "Fraction answering Yes",
+    ylim: tuple[float, float] = (0, 1),
+    ground_truth: dict[str, dict[str, tuple[float, float]]] | None = None,
+) -> None:
+    """Slope chart: one line per party (colored by party), x-axis = condition,
+    one panel per question/target — the pre-91c026c ablation-script chart
+    style, ported onto the aggregated (metric, key, party) dfs this pipeline
+    now produces. Panels wrap onto multiple rows (ncols per row, capped at
+    MAX_GRID_COLS).
+
+    `ground_truth`, if given, maps key -> party -> (value, 95%-CI half-width)
+    for a constant real-world reference (e.g. real ANES respondents' own
+    ratings) drawn as a dashed party-colored horizontal line with a shaded CI
+    band — a reference unaffected by the ablation condition on the x-axis, so
+    a flat line/band rather than another slope. Keys absent from
+    `ground_truth` are drawn with no reference line."""
+    n_panels = len(keys)
+    if n_panels == 0:
+        print(f"No columns to plot for {output_path} — skipping.")
+        return
+
+    labels = list(dfs.keys())
+    n_datasets = len(labels)
+    x_ticks = list(range(n_datasets))
+    right_margin = 1.6  # room for the party label drawn past the last point
+
+    ncols = min(ncols or n_panels, MAX_GRID_COLS)
+    nrows = -(-n_panels // ncols)
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=(3.3 * ncols, 4 * nrows), sharey=True, squeeze=False)
+    flat_axes = list(axes.flat)
+
+    for ax, (key, title) in zip(flat_axes, keys):
+        for party in all_parties:
+            vals, errs = [], []
+            for label in labels:
+                v, e = _lookup(dfs[label], metric, key, party, value_col, std_col)
+                vals.append(v)
+                errs.append(e)
+            color = party_colors.get(party, "#888888")
+            ax.errorbar(x_ticks, vals, yerr=errs, marker="o", color=color,
+                        linewidth=1.5, markersize=4, solid_capstyle="round",
+                        clip_on=False, capsize=2, capthick=0.8, elinewidth=0.8)
+            if not pd.isna(vals[-1]):
+                ax.text(n_datasets - 1 + 0.12, vals[-1], party,
+                        ha="left", va="center", color=color)
+
+        gt_for_key = (ground_truth or {}).get(key, {})
+        if gt_for_key:
+            for party, (gt_val, gt_err) in gt_for_key.items():
+                if pd.isna(gt_val):
+                    continue
+                color = party_colors.get(party, "#888888")
+                ax.axhline(gt_val, color=color, linestyle="--", linewidth=1.2, alpha=0.7, zorder=1)
+                if pd.notna(gt_err):
+                    ax.axhspan(gt_val - gt_err, gt_val + gt_err, color=color, alpha=0.12, zorder=0)
+            ax.text(-0.35, ylim[1] - (ylim[1] - ylim[0]) * 0.03, "Survey",
+                    fontsize=8, style="italic", color="#666666", ha="left", va="top")
+
+        ax.set_title(title, fontweight="medium", pad=8, fontsize=10)
+        ax.set_xticks(x_ticks)
+        ax.set_xticklabels(labels, rotation=30, ha="right", rotation_mode="anchor")
+        ax.set_xlim(-0.4, n_datasets - 1 + right_margin)
+        ax.set_ylim(*ylim)
+        ax.yaxis.set_major_locator(plt.MaxNLocator(5))
+        ax.yaxis.grid(True, linestyle="-", alpha=0.15, color="#333333")
+        ax.set_axisbelow(True)
+
+    for ax in flat_axes[n_panels:]:
+        ax.axis("off")
+    for row in range(nrows):
+        axes[row, 0].set_ylabel(value_label)
+
+    fig.tight_layout(pad=1.2)
     fig.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
     fig.savefig(output_path.replace('.pdf', '.png'), dpi=300, bbox_inches='tight', facecolor='white')
     plt.close(fig)

@@ -112,6 +112,31 @@ def persona_population_metrics(df: pd.DataFrame) -> dict:
     return metrics
 
 
+GROUND_TRUTH_THERM_COLUMNS = {
+    "democrats": "feelingDemocratic",
+    "republicans": "feelingRepublican",
+    "biden": "feelingBiden",
+    "trump": "feelingTrump",
+}
+
+
+def ground_truth_thermometer_by_party(df: pd.DataFrame) -> dict[str, dict[str, float]]:
+    """Real ANES respondents' own feeling-thermometer ratings toward the
+    Democratic/Republican party and Biden/Trump (ground truth, not
+    LLM-elicited — see persona_interviews.py::interview_personas), grouped by
+    the respondent's own party. Older cached/downloaded results predating
+    anes_generate_personas.py persisting feelingBiden/feelingTrump won't have
+    those columns — skipped here rather than erroring, same as any other
+    missing column."""
+    result = {}
+    for role, col in GROUND_TRUTH_THERM_COLUMNS.items():
+        if col not in df.columns:
+            continue
+        numeric = pd.to_numeric(df[col], errors="coerce")
+        result[role] = numeric.groupby(df["party"]).mean().to_dict()
+    return result
+
+
 def upload_results_artifact(df: pd.DataFrame, name: str) -> None:
     """Upload raw per-persona interview results as a wandb.Artifact, mirroring
     the platform-pickle artifact pattern in src/main.py."""

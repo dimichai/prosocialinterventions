@@ -247,6 +247,8 @@ def interview_personas(
             # dataframe (see interview_wandb.persona_population_metrics).
             "feelingDemocratic": persona.get("feelingDemocratic"),
             "feelingRepublican": persona.get("feelingRepublican"),
+            "feelingBiden":      persona.get("feelingBiden"),
+            "feelingTrump":      persona.get("feelingTrump"),
             "partisan":          persona.get("partisan"),
             "voted2020_for":     persona.get("voted2020_for"),
         }

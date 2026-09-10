@@ -296,11 +296,15 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
 
         # Refresh client every 1000 steps
         if i % 1000 == 0 and i != 0:
-            
-            new_client = OpenAI(
-                base_url="https://openrouter.ai/api/v1",
-                api_key=os.getenv(f"OPENROUTER_API_KEY_{openrouter_api_key}"),
-            )
+            if openrouter_api_key is not None:
+                new_client = OpenAI(
+                    base_url="https://openrouter.ai/api/v1",
+                    api_key=os.getenv(f"OPENROUTER_API_KEY_{openrouter_api_key}"),
+                )
+            else:
+                new_client = OpenAI(
+                    api_key=os.getenv("OPENAI_API_KEY")
+                )
             platform.set_client(new_client)
             client.close()
 

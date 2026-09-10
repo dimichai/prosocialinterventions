@@ -12,12 +12,16 @@ import persona_interviews as interview  # noqa: E402
 from interview_comparison_plots import (  # noqa: E402
     TRAIT_QUESTIONS,
     QUESTIONS,
+    GAP_ROLE_MAPS,
     fig_path,
     aggregate_population_metrics,
     aggregate_ground_truth_thermometer,
     print_population_table,
     print_question_tables,
+    print_ground_truth_thermometer_table,
+    print_ground_truth_gap_table,
     plot_slope_comparison,
+    plot_gap_slope_comparison,
     party_color_map,
 )
 
@@ -171,14 +175,14 @@ def main() -> None:
     print(f"{'='*60}")
     print_question_tables(dfs, all_keys, all_parties, question_labels, question_texts, trait_keys)
 
-    therm_roles = [
-        ("democrats", "Feeling thermometer:\nDemocrats"),
-        ("biden", "Feeling thermometer:\nBiden"),
-        ("republicans", "Feeling thermometer:\nRepublicans"),
-        ("trump", "Feeling thermometer:\nTrump"),
+    therm_role_labels = [
+        ("democrats", "Democrats"),
+        ("biden", "Biden"),
+        ("republicans", "Republicans"),
+        ("trump", "Trump"),
     ]
     therm_present = [
-        (role, title) for role, title in therm_roles
+        (role, f"Feeling thermometer:\n{label}") for role, label in therm_role_labels
         if all(((df["metric"] == "thermometer") & (df["key"] == role)).any() for df in dfs.values())
     ]
     plot_slope_comparison(dfs, therm_present, all_parties, party_colors,
@@ -186,6 +190,15 @@ def main() -> None:
                            "thermometer", "rating_mean", "rating_std", ncols=4,
                            value_label="Mean rating (0-100)", ylim=(0, 100),
                            ground_truth=ground_truth)
+    print_ground_truth_thermometer_table(ground_truth, therm_role_labels, all_parties)
+
+    # Thermometer gap T_in - T_out (own-side minus opposing-side rating), the
+    # standard affective-polarization measure, reported for parties and
+    # candidates separately plus their combined average — see GAP_ROLE_MAPS.
+    plot_gap_slope_comparison(dfs, GAP_ROLE_MAPS, all_parties, party_colors,
+                               fig_path("interview_results_ablation_thermometer_gap", args.batch_id),
+                               ncols=3, ylim=(-20, 100), ground_truth=ground_truth)
+    print_ground_truth_gap_table(ground_truth, GAP_ROLE_MAPS, all_parties)
 
 
 if __name__ == "__main__":

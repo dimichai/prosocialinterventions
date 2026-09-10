@@ -97,6 +97,22 @@ LEADER_THERM_ROLES = {
     "Republican": ("trump", "biden"),
 }
 
+# Panel title -> role_map for the thermometer-gap slope chart (see
+# plot_gap_slope_comparison / _thermometer_gap_fn). Each role_map value is
+# (own_roles, opp_roles), tuples-of-roles rather than a single role so
+# "Combined" can average across both the party and candidate thermometers —
+# built from PARTY_THERM_ROLES / LEADER_THERM_ROLES so the three panels stay
+# in sync with those.
+GAP_ROLE_MAPS: dict[str, dict[str, tuple[tuple[str, ...], tuple[str, ...]]]] = {
+    "Party": {p: ((own,), (opp,)) for p, (own, opp) in PARTY_THERM_ROLES.items()},
+    "Candidate": {p: ((own,), (opp,)) for p, (own, opp) in LEADER_THERM_ROLES.items()},
+    "Combined": {
+        p: ((PARTY_THERM_ROLES[p][0], LEADER_THERM_ROLES[p][0]),
+            (PARTY_THERM_ROLES[p][1], LEADER_THERM_ROLES[p][1]))
+        for p in PARTY_THERM_ROLES
+    },
+}
+
 PARTY_COLORS = {"Democrat": "#03357D", "Non-partisan": "#888888", "Republican": "#D50403"}
 _PARTY_COLOR_FALLBACK = ["#58508D", "#FFA600", "#2D7D2D", "#eda100"]
 
@@ -486,6 +502,91 @@ def plot_metric_comparison(
     print(f"Saved to {output_path}")
 
 
+def _plot_slope_core(
+    labels: list[str],
+    keys: list[tuple],
+    all_parties: list[str],
+    party_colors: dict[str, str],
+    output_path: str,
+    value_fn,
+    gt_fn,
+    ncols: int | None,
+    value_label: str,
+    ylim: tuple[float, float],
+) -> None:
+    """Shared slope-chart drawing loop behind plot_slope_comparison and
+    plot_gap_slope_comparison: one line per party (colored by party), x-axis =
+    condition (`labels`), one panel per `keys` entry. `value_fn(label, key,
+    party) -> (value, error)` supplies each point; `gt_fn(key, party) -> (value,
+    error)` supplies the constant real-world reference line/band (skipped where
+    it returns NaN) — the two callers differ only in how these are computed
+    (a direct (metric,key,party) df lookup vs. a derived own-minus-opposing
+    thermometer gap), everything else about the chart is identical."""
+    n_panels = len(keys)
+    if n_panels == 0:
+        print(f"No columns to plot for {output_path} — skipping.")
+        return
+
+    n_datasets = len(labels)
+    x_ticks = list(range(n_datasets))
+    right_margin = 1.6  # room for the party label drawn past the last point
+
+    ncols = min(ncols or n_panels, MAX_GRID_COLS)
+    nrows = -(-n_panels // ncols)
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=(3.3 * ncols, 4 * nrows), sharey=True, squeeze=False)
+    flat_axes = list(axes.flat)
+
+    for ax, (key, title) in zip(flat_axes, keys):
+        for party in all_parties:
+            vals, errs = [], []
+            for label in labels:
+                v, e = value_fn(label, key, party)
+                vals.append(v)
+                errs.append(e)
+            color = party_colors.get(party, "#888888")
+            ax.errorbar(x_ticks, vals, yerr=errs, marker="o", color=color,
+                        linewidth=1.5, markersize=4, solid_capstyle="round",
+                        clip_on=False, capsize=2, capthick=0.8, elinewidth=0.8)
+            if not pd.isna(vals[-1]):
+                ax.text(n_datasets - 1 + 0.12, vals[-1], party,
+                        ha="left", va="center", color=color)
+
+        any_gt = False
+        for party in all_parties:
+            gt_val, gt_err = gt_fn(key, party)
+            if pd.isna(gt_val):
+                continue
+            any_gt = True
+            color = party_colors.get(party, "#888888")
+            ax.axhline(gt_val, color=color, linestyle="--", linewidth=1.2, alpha=0.7, zorder=1)
+            if pd.notna(gt_err):
+                ax.axhspan(gt_val - gt_err, gt_val + gt_err, color=color, alpha=0.12, zorder=0)
+        if any_gt:
+            ax.text(-0.35, ylim[1] - (ylim[1] - ylim[0]) * 0.03, "Survey",
+                    fontsize=8, style="italic", color="#666666", ha="left", va="top")
+
+        ax.set_title(title, fontweight="medium", pad=8, fontsize=10)
+        ax.set_xticks(x_ticks)
+        ax.set_xticklabels(labels, rotation=30, ha="right", rotation_mode="anchor")
+        ax.set_xlim(-0.4, n_datasets - 1 + right_margin)
+        ax.set_ylim(*ylim)
+        ax.yaxis.set_major_locator(plt.MaxNLocator(5))
+        ax.yaxis.grid(True, linestyle="-", alpha=0.15, color="#333333")
+        ax.set_axisbelow(True)
+
+    for ax in flat_axes[n_panels:]:
+        ax.axis("off")
+    for row in range(nrows):
+        axes[row, 0].set_ylabel(value_label)
+
+    fig.tight_layout(pad=1.2)
+    fig.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
+    fig.savefig(output_path.replace('.pdf', '.png'), dpi=300, bbox_inches='tight', facecolor='white')
+    plt.close(fig)
+    print(f"Saved to {output_path}")
+
+
 def plot_slope_comparison(
     dfs: dict[str, pd.DataFrame],
     keys: list[tuple[str, str]],
@@ -512,68 +613,117 @@ def plot_slope_comparison(
     band — a reference unaffected by the ablation condition on the x-axis, so
     a flat line/band rather than another slope. Keys absent from
     `ground_truth` are drawn with no reference line."""
-    n_panels = len(keys)
-    if n_panels == 0:
-        print(f"No columns to plot for {output_path} — skipping.")
+    def value_fn(label, key, party):
+        return _lookup(dfs[label], metric, key, party, value_col, std_col)
+
+    def gt_fn(key, party):
+        return (ground_truth or {}).get(key, {}).get(party, (float("nan"), float("nan")))
+
+    _plot_slope_core(list(dfs.keys()), keys, all_parties, party_colors, output_path,
+                      value_fn, gt_fn, ncols, value_label, ylim)
+
+
+def _thermometer_gap(get_rating, role_map: dict[str, tuple[tuple[str, ...], tuple[str, ...]]], party: str) -> tuple[float, float]:
+    """Thermometer gap T_in - T_out for `party`: own-side rating minus
+    opposing-side rating, where `get_rating(role, party) -> (value, error)`
+    is the source (an aggregated df lookup, or a ground-truth dict) and
+    `role_map[party] = (own_roles, opp_roles)` (see GAP_ROLE_MAPS) gives each
+    side's thermometer role(s) — averaged when a side has more than one (the
+    "Combined" panel averages the party and candidate thermometers). Errors
+    on both sides are combined assuming independence (same approximation as
+    _affective_polarization_fn); NaN if any role on either side is missing."""
+    if party not in role_map:
+        return float("nan"), float("nan")
+    own_roles, opp_roles = role_map[party]
+
+    def side(roles: tuple[str, ...]) -> tuple[float, float]:
+        vals, errs = [], []
+        for role in roles:
+            v, e = get_rating(role, party)
+            if math.isnan(v):
+                return float("nan"), float("nan")
+            vals.append(v)
+            errs.append(e if not math.isnan(e) else 0.0)
+        return sum(vals) / len(vals), math.hypot(*errs) / len(errs)
+
+    own_val, own_err = side(own_roles)
+    opp_val, opp_err = side(opp_roles)
+    if math.isnan(own_val) or math.isnan(opp_val):
+        return float("nan"), float("nan")
+    return own_val - opp_val, math.hypot(own_err, opp_err)
+
+
+def plot_gap_slope_comparison(
+    dfs: dict[str, pd.DataFrame],
+    panels: dict[str, dict[str, tuple[tuple[str, ...], tuple[str, ...]]]],
+    all_parties: list[str],
+    party_colors: dict[str, str],
+    output_path: str,
+    ncols: int | None = None,
+    value_label: str = "Thermometer gap:  T(in) - T(out)",
+    ylim: tuple[float, float] = (-20, 100),
+    ground_truth: dict[str, dict[str, tuple[float, float]]] | None = None,
+) -> None:
+    """Slope chart of the thermometer gap T_in - T_out — own-side rating minus
+    opposing-side rating, the standard affective-polarization measure — one
+    panel per `panels` entry (e.g. GAP_ROLE_MAPS' "Party"/"Candidate"/
+    "Combined"), same layout/reference-line convention as plot_slope_comparison
+    (see _plot_slope_core), except each point is a derived gap (via
+    _thermometer_gap) rather than a direct (metric,key,party) lookup, since
+    which two thermometer rows to diff depends on the party itself."""
+    def value_fn(label, title, party):
+        get_rating = lambda role, p: _lookup(dfs[label], "thermometer", role, p, "rating_mean", "rating_std")
+        return _thermometer_gap(get_rating, panels[title], party)
+
+    def gt_fn(title, party):
+        if not ground_truth:
+            return float("nan"), float("nan")
+        get_rating = lambda role, p: ground_truth.get(role, {}).get(p, (float("nan"), float("nan")))
+        return _thermometer_gap(get_rating, panels[title], party)
+
+    keys = [(title, title) for title in panels]
+    _plot_slope_core(list(dfs.keys()), keys, all_parties, party_colors, output_path,
+                      value_fn, gt_fn, ncols, value_label, ylim)
+
+
+def print_ground_truth_thermometer_table(
+    ground_truth: dict[str, dict[str, tuple[float, float]]],
+    roles: list[tuple[str, str]],
+    all_parties: list[str],
+) -> None:
+    """Print real ANES respondents' own feeling-thermometer rating toward each
+    target in `roles` (as (role, row_label) pairs), by their own party — the
+    same ground truth drawn as the dashed reference lines in
+    plot_slope_comparison's thermometer chart (see
+    aggregate_ground_truth_thermometer), as an actual table since a line on a
+    plot can't be read off precisely."""
+    present = [(role, label) for role, label in roles if role in ground_truth]
+    if not present:
         return
+    role_by_label = {label: role for role, label in present}
 
-    labels = list(dfs.keys())
-    n_datasets = len(labels)
-    x_ticks = list(range(n_datasets))
-    right_margin = 1.6  # room for the party label drawn past the last point
+    def value_fn(label, party):
+        return ground_truth.get(role_by_label[label], {}).get(party, (float("nan"), float("nan")))
 
-    ncols = min(ncols or n_panels, MAX_GRID_COLS)
-    nrows = -(-n_panels // ncols)
+    _print_comparison_table("Feeling thermometer ground truth (real ANES respondents, by own party)",
+                             [label for _, label in present], all_parties, value_fn)
 
-    fig, axes = plt.subplots(nrows, ncols, figsize=(3.3 * ncols, 4 * nrows), sharey=True, squeeze=False)
-    flat_axes = list(axes.flat)
 
-    for ax, (key, title) in zip(flat_axes, keys):
-        for party in all_parties:
-            vals, errs = [], []
-            for label in labels:
-                v, e = _lookup(dfs[label], metric, key, party, value_col, std_col)
-                vals.append(v)
-                errs.append(e)
-            color = party_colors.get(party, "#888888")
-            ax.errorbar(x_ticks, vals, yerr=errs, marker="o", color=color,
-                        linewidth=1.5, markersize=4, solid_capstyle="round",
-                        clip_on=False, capsize=2, capthick=0.8, elinewidth=0.8)
-            if not pd.isna(vals[-1]):
-                ax.text(n_datasets - 1 + 0.12, vals[-1], party,
-                        ha="left", va="center", color=color)
+def print_ground_truth_gap_table(
+    ground_truth: dict[str, dict[str, tuple[float, float]]],
+    panels: dict[str, dict[str, tuple[tuple[str, ...], tuple[str, ...]]]],
+    all_parties: list[str],
+) -> None:
+    """Print the thermometer gap T_in - T_out computed from real ANES
+    respondents' own ratings (same `panels` as plot_gap_slope_comparison,
+    e.g. GAP_ROLE_MAPS) — the ground truth drawn as the dashed reference
+    lines in that chart, as an actual table."""
+    def value_fn(title, party):
+        get_rating = lambda role, p: ground_truth.get(role, {}).get(p, (float("nan"), float("nan")))
+        return _thermometer_gap(get_rating, panels[title], party)
 
-        gt_for_key = (ground_truth or {}).get(key, {})
-        if gt_for_key:
-            for party, (gt_val, gt_err) in gt_for_key.items():
-                if pd.isna(gt_val):
-                    continue
-                color = party_colors.get(party, "#888888")
-                ax.axhline(gt_val, color=color, linestyle="--", linewidth=1.2, alpha=0.7, zorder=1)
-                if pd.notna(gt_err):
-                    ax.axhspan(gt_val - gt_err, gt_val + gt_err, color=color, alpha=0.12, zorder=0)
-            ax.text(-0.35, ylim[1] - (ylim[1] - ylim[0]) * 0.03, "Survey",
-                    fontsize=8, style="italic", color="#666666", ha="left", va="top")
-
-        ax.set_title(title, fontweight="medium", pad=8, fontsize=10)
-        ax.set_xticks(x_ticks)
-        ax.set_xticklabels(labels, rotation=30, ha="right", rotation_mode="anchor")
-        ax.set_xlim(-0.4, n_datasets - 1 + right_margin)
-        ax.set_ylim(*ylim)
-        ax.yaxis.set_major_locator(plt.MaxNLocator(5))
-        ax.yaxis.grid(True, linestyle="-", alpha=0.15, color="#333333")
-        ax.set_axisbelow(True)
-
-    for ax in flat_axes[n_panels:]:
-        ax.axis("off")
-    for row in range(nrows):
-        axes[row, 0].set_ylabel(value_label)
-
-    fig.tight_layout(pad=1.2)
-    fig.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
-    fig.savefig(output_path.replace('.pdf', '.png'), dpi=300, bbox_inches='tight', facecolor='white')
-    plt.close(fig)
-    print(f"Saved to {output_path}")
+    _print_comparison_table("Thermometer gap ground truth (T_in - T_out, real ANES respondents)",
+                             list(panels.keys()), all_parties, value_fn)
 
 
 def _affective_polarization_fn(dfs: dict[str, pd.DataFrame], role_map: dict[str, tuple[str, str]]):

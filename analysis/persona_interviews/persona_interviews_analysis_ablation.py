@@ -10,20 +10,34 @@ sys.path.insert(0, os.path.dirname(__file__))
 import interview_wandb  # noqa: E402
 import persona_interviews as interview  # noqa: E402
 from interview_comparison_plots import (  # noqa: E402
-    TRAIT_QUESTIONS,
+    POSITIVE_TRAIT_QUESTIONS,
+    NEGATIVE_TRAIT_QUESTIONS,
+    trait_gap_role_map,
+    trait_dont_know_roles,
     QUESTIONS,
     GAP_ROLE_MAPS,
+    FOLLOW_GAP_ROLE_MAPS,
     fig_path,
     aggregate_population_metrics,
     aggregate_ground_truth_thermometer,
     print_population_table,
     print_question_tables,
+    print_thermometer_table,
     print_ground_truth_thermometer_table,
     print_ground_truth_gap_table,
+    print_gap_comparison_table,
     plot_slope_comparison,
     plot_gap_slope_comparison,
+    plot_role_average_comparison,
     party_color_map,
 )
+
+# Open-mindedness is excluded from this ablation evaluation — not plotted in
+# the trait battery and not used in the trait differential — so this script
+# works off this filtered trait list everywhere instead of the full
+# TRAIT_QUESTIONS.
+POSITIVE_TRAIT_QUESTIONS_ABLATION = [q for q in POSITIVE_TRAIT_QUESTIONS if q[0] != "openminded"]
+TRAIT_QUESTIONS_ABLATION = POSITIVE_TRAIT_QUESTIONS_ABLATION + NEGATIVE_TRAIT_QUESTIONS
 
 
 # Human-readable labels for the additive AP/PID/VB ablation chain (see
@@ -122,7 +136,7 @@ def main() -> None:
     # Interleaved (dem, rep) per trait — not all-Democrat-traits-then-all-Republican
     # — so the trait battery plot below can put each trait's two panels side by
     # side (e.g. "Democrats: intelligent?" right next to "Republicans: intelligent?").
-    trait_keys  = [k for key, _ in TRAIT_QUESTIONS for k in (f"dem_{key}", f"rep_{key}")]
+    trait_keys  = [k for key, _ in TRAIT_QUESTIONS_ABLATION for k in (f"dem_{key}", f"rep_{key}")]
 
     # Real labels only — ablation batches are always the real-label (obfuscation
     # "none") condition, so unlike the obfuscation comparison there's nothing to
@@ -135,7 +149,7 @@ def main() -> None:
         'q4': "Would you follow\nsomeone who loves Biden?",
         'q5': "Would you follow\nsomeone who hates Biden?",
     }
-    for key, trait in TRAIT_QUESTIONS:
+    for key, trait in TRAIT_QUESTIONS_ABLATION:
         question_labels[f"dem_{key}"] = f"Democrats:\nare they {trait}?"
         question_labels[f"rep_{key}"] = f"Republicans:\nare they {trait}?"
     question_texts = {k: t for k, t in QUESTIONS}
@@ -159,6 +173,24 @@ def main() -> None:
     plot_slope_comparison(dfs, follow_present, all_parties, party_colors,
                            fig_path("interview_results_ablation", args.batch_id),
                            "question", "pct_yes_mean", "pct_yes_std", ncols=3)
+
+    # Follow gap: Pr(follow in-party) - Pr(follow out-party), and the
+    # analogous gap between agents who love vs. hate each candidate — see
+    # FOLLOW_GAP_ROLE_MAPS.
+    plot_gap_slope_comparison(dfs, FOLLOW_GAP_ROLE_MAPS, all_parties, party_colors,
+                               fig_path("interview_results_ablation_follow_gap", args.batch_id),
+                               ncols=3, value_label="Follow gap",
+                               ylim=(-1, 1), metric="question", value_col="pct_yes_mean", std_col="pct_yes_std")
+    print_gap_comparison_table(dfs, FOLLOW_GAP_ROLE_MAPS["Party"], all_parties,
+                                "Follow gap (party): Pr(follow in-party) - Pr(follow out-party)",
+                                metric="question", value_col="pct_yes_mean", std_col="pct_yes_std")
+    print_gap_comparison_table(dfs, FOLLOW_GAP_ROLE_MAPS["Biden"], all_parties,
+                                "Follow gap (Biden): Pr(follow lover) - Pr(follow hater)",
+                                metric="question", value_col="pct_yes_mean", std_col="pct_yes_std")
+    print_gap_comparison_table(dfs, FOLLOW_GAP_ROLE_MAPS["Trump"], all_parties,
+                                "Follow gap (Trump): Pr(follow lover) - Pr(follow hater)",
+                                metric="question", value_col="pct_yes_mean", std_col="pct_yes_std")
+
     plot_slope_comparison(dfs, trait_present, all_parties, party_colors,
                            fig_path("interview_results_ablation_traits", args.batch_id),
                            "question", "pct_yes_mean", "pct_yes_std", ncols=2)
@@ -190,6 +222,7 @@ def main() -> None:
                            "thermometer", "rating_mean", "rating_std", ncols=4,
                            value_label="Mean rating (0-100)", ylim=(0, 100),
                            ground_truth=ground_truth)
+    print_thermometer_table(dfs, therm_role_labels, all_parties)
     print_ground_truth_thermometer_table(ground_truth, therm_role_labels, all_parties)
 
     # Thermometer gap T_in - T_out (own-side minus opposing-side rating), the
@@ -198,7 +231,41 @@ def main() -> None:
     plot_gap_slope_comparison(dfs, GAP_ROLE_MAPS, all_parties, party_colors,
                                fig_path("interview_results_ablation_thermometer_gap", args.batch_id),
                                ncols=3, ylim=(-20, 100), ground_truth=ground_truth)
+    for title in GAP_ROLE_MAPS:
+        print_gap_comparison_table(dfs, GAP_ROLE_MAPS[title], all_parties,
+                                    f"Thermometer gap",
+                                    metric="thermometer", value_col="rating_mean", std_col="rating_std")
     print_ground_truth_gap_table(ground_truth, GAP_ROLE_MAPS, all_parties)
+
+    # Trait differential: the share of positive (resp. negative) traits a
+    # party's respondents attribute to their own party minus the share they
+    # attribute to the opposing party — don't-know responses reported as
+    # their own rate rather than recoded into the differential. Open-
+    # mindedness is excluded from the positive-trait battery (see
+    # POSITIVE_TRAIT_QUESTIONS_ABLATION above).
+    trait_gap_role_maps = {
+        "Positive traits": trait_gap_role_map(POSITIVE_TRAIT_QUESTIONS_ABLATION),
+        "Negative traits": trait_gap_role_map(NEGATIVE_TRAIT_QUESTIONS),
+    }
+    trait_dont_know_role_sets = {
+        "Positive traits": trait_dont_know_roles(POSITIVE_TRAIT_QUESTIONS_ABLATION),
+        "Negative traits": trait_dont_know_roles(NEGATIVE_TRAIT_QUESTIONS),
+    }
+    plot_gap_slope_comparison(dfs, trait_gap_role_maps, all_parties, party_colors,
+                               fig_path("interview_results_ablation_trait_differential_no_openminded", args.batch_id),
+                               ncols=2, value_label="Trait differential",
+                               ylim=(-1, 1), metric="question", value_col="pct_yes_mean", std_col="pct_yes_std")
+    plot_role_average_comparison(dfs, trait_dont_know_role_sets, all_parties, party_colors,
+                                  fig_path("interview_results_ablation_trait_differential_no_openminded_dont_know", args.batch_id),
+                                  ncols=2, value_label='Fraction answering "don\'t know"', ylim=(0, 1))
+    print_gap_comparison_table(dfs, trait_gap_role_maps["Positive traits"], all_parties,
+                                "Positive traits: share(in-party) - share(out-party)",
+                                metric="question", value_col="pct_yes_mean", std_col="pct_yes_std",
+                                dont_know_roles=trait_dont_know_role_sets["Positive traits"])
+    print_gap_comparison_table(dfs, trait_gap_role_maps["Negative traits"], all_parties,
+                                "Negative traits: share(in-party) - share(out-party)",
+                                metric="question", value_col="pct_yes_mean", std_col="pct_yes_std",
+                                dont_know_roles=trait_dont_know_role_sets["Negative traits"])
 
 
 if __name__ == "__main__":

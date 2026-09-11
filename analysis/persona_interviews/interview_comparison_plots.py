@@ -60,16 +60,21 @@ plt.rcParams.update({
 })
 
 
-# (key_suffix, trait) — asked once for Democrats and once for Republicans
-TRAIT_QUESTIONS = [
+# (key_suffix, trait) — asked once for Democrats and once for Republicans.
+# Split by polarity (see TRAIT_GAP_ROLE_MAPS/TRAIT_DONT_KNOW_ROLES below) so a
+# trait's positive/negative classification lives in exactly one place.
+POSITIVE_TRAIT_QUESTIONS = [
     ("intelligent",   "intelligent"),
     ("honest",        "honest"),
     ("generous",      "generous"),
     ("openminded",    "open-minded"),
+]
+NEGATIVE_TRAIT_QUESTIONS = [
     ("hypocritical",  "hypocritical"),
     ("selfish",       "selfish"),
     ("mean",          "mean"),
 ]
+TRAIT_QUESTIONS = POSITIVE_TRAIT_QUESTIONS + NEGATIVE_TRAIT_QUESTIONS
 
 QUESTIONS = [
     ("q1_dem", "On a social network, would you follow someone who is a member of the Democrats?"),
@@ -111,6 +116,71 @@ GAP_ROLE_MAPS: dict[str, dict[str, tuple[tuple[str, ...], tuple[str, ...]]]] = {
             (PARTY_THERM_ROLES[p][1], LEADER_THERM_ROLES[p][1]))
         for p in PARTY_THERM_ROLES
     },
+}
+
+# Panel title -> role_map for the follow-gap slope chart (see
+# plot_gap_slope_comparison, with metric="question", value_col="pct_yes_mean",
+# std_col="pct_yes_std"). "Party" is Pr(follow in-party) - Pr(follow
+# out-party), own/opp flipping with the respondent's party like
+# PARTY_THERM_ROLES (q1_dem/q1_rep, see QUESTIONS). "Biden"/"Trump" are the
+# analogous gap between willingness to follow someone who loves vs. hates
+# that candidate (q4/q5, q2/q3) — fixed rather than party-flipped, since
+# loving/hating a candidate isn't itself party-dependent.
+FOLLOW_GAP_ROLE_MAPS: dict[str, dict[str, tuple[tuple[str, ...], tuple[str, ...]]]] = {
+    "Party": {
+        "Democrat":   (("q1_dem",), ("q1_rep",)),
+        "Republican": (("q1_rep",), ("q1_dem",)),
+    },
+    "Biden": {
+        "Democrat":   (("q4",), ("q5",)),
+        "Republican": (("q4",), ("q5",)),
+    },
+    "Trump": {
+        "Democrat":   (("q2",), ("q3",)),
+        "Republican": (("q2",), ("q3",)),
+    },
+}
+
+
+def trait_gap_role_map(trait_questions: list[tuple[str, str]]) -> dict[str, tuple[tuple[str, ...], tuple[str, ...]]]:
+    """Build one TRAIT_GAP_ROLE_MAPS-shaped role map (own/opp trait keys per
+    party) from an arbitrary trait-question list — the constructor behind
+    TRAIT_GAP_ROLE_MAPS itself, exposed so callers can build a variant over a
+    different trait subset (e.g. a polarity's battery with one trait
+    excluded, for a robustness check) without duplicating the dem_/rep_
+    prefixing logic."""
+    keys = [k for k, _ in trait_questions]
+    return {
+        "Democrat":   (tuple(f"dem_{k}" for k in keys), tuple(f"rep_{k}" for k in keys)),
+        "Republican": (tuple(f"rep_{k}" for k in keys), tuple(f"dem_{k}" for k in keys)),
+    }
+
+
+def trait_dont_know_roles(trait_questions: list[tuple[str, str]]) -> tuple[str, ...]:
+    """Trait keys (both dem_/rep_ targets) for an arbitrary trait-question
+    list — the constructor behind TRAIT_DONT_KNOW_ROLES, exposed for the same
+    reason as trait_gap_role_map."""
+    return tuple(f"{prefix}_{k}" for k, _ in trait_questions for prefix in ("dem", "rep"))
+
+
+# Positive/negative trait-differential role maps — same idea as
+# GAP_ROLE_MAPS, but the "own"/"opposing" ratings being differenced are LLM
+# yes-rates on the trait battery (POSITIVE_TRAIT_QUESTIONS/
+# NEGATIVE_TRAIT_QUESTIONS) rather than feeling-thermometer scores: the share
+# of traits of that polarity a party's respondents attribute to their own
+# party minus the share they attribute to the opposing party.
+TRAIT_GAP_ROLE_MAPS: dict[str, dict[str, tuple[tuple[str, ...], tuple[str, ...]]]] = {
+    "Positive traits": trait_gap_role_map(POSITIVE_TRAIT_QUESTIONS),
+    "Negative traits": trait_gap_role_map(NEGATIVE_TRAIT_QUESTIONS),
+}
+
+# Trait keys (both dem_/rep_ targets) of each polarity — the question set a
+# trait-differential panel's don't-know rate is averaged across (see
+# _role_average). Party-independent since the same questions are asked of
+# every respondent regardless of their own party.
+TRAIT_DONT_KNOW_ROLES: dict[str, tuple[str, ...]] = {
+    "Positive traits": trait_dont_know_roles(POSITIVE_TRAIT_QUESTIONS),
+    "Negative traits": trait_dont_know_roles(NEGATIVE_TRAIT_QUESTIONS),
 }
 
 PARTY_COLORS = {"Democrat": "#03357D", "Non-partisan": "#888888", "Republican": "#D50403"}
@@ -502,6 +572,34 @@ def plot_metric_comparison(
     print(f"Saved to {output_path}")
 
 
+def _declutter_positions(values: list[float], min_gap: float) -> list[float]:
+    """Nudge `values` apart (preserving order) so every adjacent pair ends up
+    at least `min_gap` apart, moving each as little as possible — used to
+    keep line-end labels (e.g. party names) from overlapping when their
+    final values are close together. Each iteration splits every too-close
+    adjacent pair's deficit evenly between the two (a small 1D force
+    relaxation); repeated until no pair violates min_gap, which also
+    resolves longer runs of close values since a pair's push can itself
+    create (and then resolve) a violation with its other neighbor. NaN
+    entries pass through untouched and aren't counted as neighbors."""
+    order = sorted((i for i in range(len(values)) if not math.isnan(values[i])), key=lambda i: values[i])
+    positions = list(values)
+    if len(order) < 2:
+        return positions
+    for _ in range(len(order) * 4):
+        moved = False
+        for a, b in zip(order, order[1:]):
+            gap = positions[b] - positions[a]
+            if gap < min_gap:
+                deficit = (min_gap - gap) / 2
+                positions[a] -= deficit
+                positions[b] += deficit
+                moved = True
+        if not moved:
+            break
+    return positions
+
+
 def _plot_slope_core(
     labels: list[str],
     keys: list[tuple],
@@ -538,18 +636,29 @@ def _plot_slope_core(
     flat_axes = list(axes.flat)
 
     for ax, (key, title) in zip(flat_axes, keys):
+        party_vals = {}
         for party in all_parties:
             vals, errs = [], []
             for label in labels:
                 v, e = value_fn(label, key, party)
                 vals.append(v)
                 errs.append(e)
+            party_vals[party] = (vals, errs)
+
+        # Party labels are drawn past the last point at that point's y-value —
+        # decluttered so two parties ending up close together (e.g. gap ~0)
+        # don't render as overlapping text (see _declutter_positions).
+        final_vals = [party_vals[p][0][-1] for p in all_parties]
+        label_ys = _declutter_positions(final_vals, (ylim[1] - ylim[0]) * 0.06)
+
+        for party, label_y in zip(all_parties, label_ys):
+            vals, errs = party_vals[party]
             color = party_colors.get(party, "#888888")
             ax.errorbar(x_ticks, vals, yerr=errs, marker="o", color=color,
                         linewidth=1.5, markersize=4, solid_capstyle="round",
                         clip_on=False, capsize=2, capthick=0.8, elinewidth=0.8)
             if not pd.isna(vals[-1]):
-                ax.text(n_datasets - 1 + 0.12, vals[-1], party,
+                ax.text(n_datasets - 1 + 0.12, label_y, party,
                         ha="left", va="center", color=color)
 
         any_gt = False
@@ -623,31 +732,40 @@ def plot_slope_comparison(
                       value_fn, gt_fn, ncols, value_label, ylim)
 
 
+def _role_average(get_rating, roles: tuple[str, ...], party: str) -> tuple[float, float]:
+    """Mean value (and combined-independent-error) of `get_rating(role, party)
+    -> (value, error)` across `roles` — the "one side" of a _thermometer_gap,
+    exposed standalone for panels that want a single averaged rate rather
+    than an own-minus-opposing difference (e.g. the don't-know rate averaged
+    across a trait-polarity's question set, see plot_role_average_comparison).
+    NaN if any role is missing."""
+    vals, errs = [], []
+    for role in roles:
+        v, e = get_rating(role, party)
+        if math.isnan(v):
+            return float("nan"), float("nan")
+        vals.append(v)
+        errs.append(e if not math.isnan(e) else 0.0)
+    return sum(vals) / len(vals), math.hypot(*errs) / len(errs)
+
+
 def _thermometer_gap(get_rating, role_map: dict[str, tuple[tuple[str, ...], tuple[str, ...]]], party: str) -> tuple[float, float]:
     """Thermometer gap T_in - T_out for `party`: own-side rating minus
     opposing-side rating, where `get_rating(role, party) -> (value, error)`
     is the source (an aggregated df lookup, or a ground-truth dict) and
     `role_map[party] = (own_roles, opp_roles)` (see GAP_ROLE_MAPS) gives each
-    side's thermometer role(s) — averaged when a side has more than one (the
-    "Combined" panel averages the party and candidate thermometers). Errors
-    on both sides are combined assuming independence (same approximation as
-    _affective_polarization_fn); NaN if any role on either side is missing."""
+    side's thermometer role(s) — averaged via _role_average when a side has
+    more than one (the "Combined" panel averages the party and candidate
+    thermometers; a trait-differential panel averages a whole trait-polarity
+    battery, see TRAIT_GAP_ROLE_MAPS). Errors on both sides are combined
+    assuming independence (same approximation as _affective_polarization_fn);
+    NaN if any role on either side is missing."""
     if party not in role_map:
         return float("nan"), float("nan")
     own_roles, opp_roles = role_map[party]
 
-    def side(roles: tuple[str, ...]) -> tuple[float, float]:
-        vals, errs = [], []
-        for role in roles:
-            v, e = get_rating(role, party)
-            if math.isnan(v):
-                return float("nan"), float("nan")
-            vals.append(v)
-            errs.append(e if not math.isnan(e) else 0.0)
-        return sum(vals) / len(vals), math.hypot(*errs) / len(errs)
-
-    own_val, own_err = side(own_roles)
-    opp_val, opp_err = side(opp_roles)
+    own_val, own_err = _role_average(get_rating, own_roles, party)
+    opp_val, opp_err = _role_average(get_rating, opp_roles, party)
     if math.isnan(own_val) or math.isnan(opp_val):
         return float("nan"), float("nan")
     return own_val - opp_val, math.hypot(own_err, opp_err)
@@ -660,19 +778,25 @@ def plot_gap_slope_comparison(
     party_colors: dict[str, str],
     output_path: str,
     ncols: int | None = None,
-    value_label: str = "Thermometer gap:  T(in) - T(out)",
+    value_label: str = "Thermometer gap",
     ylim: tuple[float, float] = (-20, 100),
     ground_truth: dict[str, dict[str, tuple[float, float]]] | None = None,
+    metric: str = "thermometer",
+    value_col: str = "rating_mean",
+    std_col: str = "rating_std",
 ) -> None:
-    """Slope chart of the thermometer gap T_in - T_out — own-side rating minus
-    opposing-side rating, the standard affective-polarization measure — one
-    panel per `panels` entry (e.g. GAP_ROLE_MAPS' "Party"/"Candidate"/
-    "Combined"), same layout/reference-line convention as plot_slope_comparison
-    (see _plot_slope_core), except each point is a derived gap (via
+    """Slope chart of an own-minus-opposing gap — the standard
+    affective-polarization measure, generalized from the feeling thermometer
+    to any (metric, value_col, std_col) aggregated column — one panel per
+    `panels` entry (e.g. GAP_ROLE_MAPS' "Party"/"Candidate"/"Combined", or
+    TRAIT_GAP_ROLE_MAPS' "Positive traits"/"Negative traits" with
+    metric="question", value_col="pct_yes_mean", std_col="pct_yes_std"),
+    same layout/reference-line convention as plot_slope_comparison (see
+    _plot_slope_core), except each point is a derived gap (via
     _thermometer_gap) rather than a direct (metric,key,party) lookup, since
-    which two thermometer rows to diff depends on the party itself."""
+    which two rows to diff depends on the party itself."""
     def value_fn(label, title, party):
-        get_rating = lambda role, p: _lookup(dfs[label], "thermometer", role, p, "rating_mean", "rating_std")
+        get_rating = lambda role, p: _lookup(dfs[label], metric, role, p, value_col, std_col)
         return _thermometer_gap(get_rating, panels[title], party)
 
     def gt_fn(title, party):
@@ -684,6 +808,78 @@ def plot_gap_slope_comparison(
     keys = [(title, title) for title in panels]
     _plot_slope_core(list(dfs.keys()), keys, all_parties, party_colors, output_path,
                       value_fn, gt_fn, ncols, value_label, ylim)
+
+
+def plot_role_average_comparison(
+    dfs: dict[str, pd.DataFrame],
+    panels: dict[str, tuple[str, ...]],
+    all_parties: list[str],
+    party_colors: dict[str, str],
+    output_path: str,
+    ncols: int | None = None,
+    value_label: str = "Rate",
+    ylim: tuple[float, float] = (0, 1),
+    metric: str = "question",
+    value_col: str = "pct_dont_know_mean",
+    std_col: str = "pct_dont_know_std",
+) -> None:
+    """Slope chart of `value_col` averaged across a fixed question-key set per
+    panel (see _role_average) — same layout as plot_gap_slope_comparison, but
+    one averaged rate per point instead of an own-minus-opposing gap. Used to
+    report a trait-differential panel's don't-know rate on its own rather
+    than netting it into the gap (see TRAIT_DONT_KNOW_ROLES); unlike
+    plot_gap_slope_comparison's panels, `panels[title]` here is a single
+    role tuple (not per-party own/opp roles), since the averaged question set
+    doesn't depend on the respondent's own party."""
+    def value_fn(label, title, party):
+        get_rating = lambda role, p: _lookup(dfs[label], metric, role, p, value_col, std_col)
+        return _role_average(get_rating, panels[title], party)
+
+    def gt_fn(title, party):
+        return float("nan"), float("nan")
+
+    keys = [(title, title) for title in panels]
+    _plot_slope_core(list(dfs.keys()), keys, all_parties, party_colors, output_path,
+                      value_fn, gt_fn, ncols, value_label, ylim)
+
+
+def print_thermometer_table(
+    dfs: dict[str, pd.DataFrame],
+    roles: list[tuple[str, str]],
+    all_parties: list[str],
+) -> None:
+    """Print the LLM-answered feeling-thermometer rating (rows = condition,
+    columns = party) for each target in `roles` (as (role, row_label) pairs)
+    — the actual per-condition values drawn as points in
+    plot_slope_comparison's thermometer chart (mirrors the printed table
+    plot_thermometer_comparison already draws for the obfuscation-style
+    combined chart, exposed standalone for callers like the ablation script
+    that build the thermometer chart via plot_slope_comparison directly).
+    Each cell is annotated with its not-recognized rate (the target wasn't a
+    well-known enough figure/party label for the respondent to rate), same
+    convention as plot_thermometer_comparison."""
+    def value_fn(role):
+        return lambda label, party: _lookup(dfs[label], "thermometer", role, party, "rating_mean", "rating_std")
+
+    def not_recognized_fn(role):
+        def fn(label, party):
+            rec, err = _lookup(dfs[label], "thermometer", role, party, "pct_recognized_mean", "pct_recognized_std")
+            if pd.isna(rec):
+                return float("nan"), float("nan")
+            return 1.0 - rec, err
+        return fn
+
+    present = [(role, label) for role, label in roles
+               if any(((df["metric"] == "thermometer") & (df["key"] == role)).any() for df in dfs.values())]
+    if not present:
+        return
+
+    print(f"\n{'='*60}")
+    print("  Feeling thermometer (rows = condition, columns = party)")
+    print(f"{'='*60}")
+    for role, label in present:
+        _print_comparison_table(f"Feeling thermometer: {label}", list(dfs.keys()), all_parties, value_fn(role),
+                                 secondary_fn=not_recognized_fn(role), secondary_prefix="nr")
 
 
 def print_ground_truth_thermometer_table(
@@ -724,6 +920,42 @@ def print_ground_truth_gap_table(
 
     _print_comparison_table("Thermometer gap ground truth (T_in - T_out, real ANES respondents)",
                              list(panels.keys()), all_parties, value_fn)
+
+
+def print_gap_comparison_table(
+    dfs: dict[str, pd.DataFrame],
+    role_map: dict[str, tuple[tuple[str, ...], tuple[str, ...]]],
+    all_parties: list[str],
+    title: str,
+    metric: str = "thermometer",
+    value_col: str = "rating_mean",
+    std_col: str = "rating_std",
+    dont_know_roles: tuple[str, ...] | None = None,
+    dont_know_metric: str = "question",
+    dont_know_value_col: str = "pct_dont_know_mean",
+    dont_know_std_col: str = "pct_dont_know_std",
+) -> None:
+    """Print the own-minus-opposing gap (see _thermometer_gap) computed per
+    condition (rows) and party (columns) from the aggregated per-condition
+    LLM-answer dfs — same shape as print_ground_truth_gap_table, but for the
+    LLM answers themselves (any (metric, value_col, std_col), e.g. the trait
+    battery's pct_yes) rather than the ANES thermometer ground truth.
+    `dont_know_roles`, if given, appends each cell's don't-know rate averaged
+    across that (party-independent) question set (see _role_average) — kept
+    as its own reported rate rather than folded into the gap, same convention
+    as print_question_tables' trait cells."""
+    def value_fn(label, party):
+        get_rating = lambda role, p: _lookup(dfs[label], metric, role, p, value_col, std_col)
+        return _thermometer_gap(get_rating, role_map, party)
+
+    secondary_fn = None
+    if dont_know_roles is not None:
+        def secondary_fn(label, party):
+            get_rating = lambda role, p: _lookup(dfs[label], dont_know_metric, role, p, dont_know_value_col, dont_know_std_col)
+            return _role_average(get_rating, dont_know_roles, party)
+
+    _print_comparison_table(title, list(dfs.keys()), all_parties, value_fn,
+                             secondary_fn=secondary_fn, secondary_prefix="dk", secondary_fmt="{:.1%}")
 
 
 def _affective_polarization_fn(dfs: dict[str, pd.DataFrame], role_map: dict[str, tuple[str, str]]):

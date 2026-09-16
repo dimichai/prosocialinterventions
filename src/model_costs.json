@@ -28,5 +28,10 @@
         "input": 0.25,
         "output": 1.25,
         "cached_input": 0.03
+    },
+    "deepseek/deepseek-v4-flash-0731": {
+        "input": 0.04,
+        "output": 0.10,
+        "cached_input": 0.01
     }
 }

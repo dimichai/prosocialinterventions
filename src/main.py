@@ -75,9 +75,16 @@ def compute_metrics(platform, step, cost_input, cost_output, cost_cached, comput
     total_input = sum(u.used_tokens_input for u in platform.users)
     total_output = sum(u.used_tokens_output for u in platform.users)
     total_cached = sum(u.used_tokens_cached for u in platform.users)
-    metrics["estimated_cost"] = ((cost_output / 1e6) * total_output) + \
-        ((cost_input / 1e6) * (total_input - total_cached)) + \
-        ((cost_cached / 1e6) * total_cached)
+    if cost_cached is not None:
+        metrics["estimated_cost"] = ((cost_output / 1e6) * total_output) + \
+            ((cost_input / 1e6) * (total_input - total_cached)) + \
+            ((cost_cached / 1e6) * total_cached)
+    else:
+        # No cached-input price for this model (model_costs.json has
+        # "cached_input": null) -- fall back to pricing all input tokens
+        # at the regular input rate instead of failing on None / 1e6.
+        metrics["estimated_cost"] = ((cost_output / 1e6) * total_output) + \
+            ((cost_input / 1e6) * total_input)
     metrics["total_tokens_input"] = total_input
     metrics["total_tokens_output"] = total_output
     metrics["total_tokens_cached"] = total_cached

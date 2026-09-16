@@ -38,11 +38,24 @@ REASONING_MODEL_PREFIXES = ("gpt-5", "openai/gpt-5", "o1", "o3", "o4")
 DEFAULT_MAX_TOKENS = 16384
 REASONING_MODEL_MAX_TOKENS = 32768
 
+# DeepSeek models reason by default on OpenRouter (unlike gpt-5-family models,
+# whose reasoning defaults to off), which burns extra tokens/latency and makes
+# them non-comparable to non-reasoning models in the ablation. "none" isn't a
+# supported effort for these models, so reasoning must be turned off via
+# `enabled: false` rather than `effort: "none"`.
+NO_REASONING_MODEL_PREFIXES = ("deepseek",)
+
 
 def _max_tokens_for_model(model: str) -> int:
     if model.lower().startswith(REASONING_MODEL_PREFIXES):
         return REASONING_MODEL_MAX_TOKENS
     return DEFAULT_MAX_TOKENS
+
+
+def _extra_body_for_model(model: str) -> dict:
+    if model.lower().startswith(NO_REASONING_MODEL_PREFIXES):
+        return {"reasoning": {"enabled": False}}
+    return {}
 
 
 class BooleanAnswer(BaseModel):
@@ -110,6 +123,7 @@ def ask_question(
                 response_format=response_format,
                 max_tokens=_max_tokens_for_model(model),
                 temperature=1.0,
+                extra_body=_extra_body_for_model(model),
             )
             if token_usage is not None and response.usage is not None:
                 token_usage["input"] += response.usage.prompt_tokens
@@ -163,6 +177,7 @@ def ask_feeling_thermometer_single(
                 response_format=ThermometerAnswer,
                 max_tokens=_max_tokens_for_model(model),
                 temperature=1.0,
+                extra_body=_extra_body_for_model(model),
             )
             if token_usage is not None and response.usage is not None:
                 token_usage["input"] += response.usage.prompt_tokens

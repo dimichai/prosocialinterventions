@@ -314,6 +314,9 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
     platform.set_client(None)
     client.close()
 
+    total_tokens_input = sum(u.used_tokens_input for u in platform.users)
+    total_tokens_output = sum(u.used_tokens_output for u in platform.users)
+
     # Save current state of the platform to wandb
     if log:
         final_metrics = compute_metrics(platform, simulation_steps, cost_input, cost_output, cost_cached, compute_clustering=True)
@@ -333,6 +336,8 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
             wandb.log_artifact(artifact)
         if own_wandb_run:
             wandb.finish()
+
+    return {"tokens_input": total_tokens_input, "tokens_output": total_tokens_output}
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser()

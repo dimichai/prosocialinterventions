@@ -109,6 +109,11 @@ def persona_population_metrics(df: pd.DataFrame) -> dict:
         metrics["personas/pct_voted_trump"] = (df["voted2020_for"] == "Donald Trump").mean()
         metrics["personas/pct_voted_biden"] = (df["voted2020_for"] == "Joe Biden").mean()
 
+    if "loveList" in df.columns and "hateList" in df.columns:
+        has_love = df["loveList"].apply(lambda v: len(v) > 0 if isinstance(v, list) else False)
+        has_hate = df["hateList"].apply(lambda v: len(v) > 0 if isinstance(v, list) else False)
+        metrics["personas/pct_has_love_or_hate_statement"] = (has_love | has_hate).mean()
+
     return metrics
 
 

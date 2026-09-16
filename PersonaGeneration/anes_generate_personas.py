@@ -754,7 +754,7 @@ def return_persona_string():
     return personas[0]['persona']
 
 
-def extend_with_ai(persona, client, model="gpt-4o-mini"):
+def extend_with_ai(persona, client, model="gpt-4o-mini", token_usage: dict | None = None):
 
     prompt = f"""I am going to give you a persona of a person. I need you to fill in some other pieces, and generate the options THREE times:
 
@@ -778,6 +778,10 @@ Please answer in the format I gave you. I will give you the persona now.
         temperature=1.0,
     )
 
+    if token_usage is not None and response.usage is not None:
+        token_usage["input"] += response.usage.prompt_tokens
+        token_usage["output"] += response.usage.completion_tokens
+
     response_class = response.choices[0].message.parsed
 
     occupations = response_class.occupations
@@ -789,7 +793,7 @@ Please answer in the format I gave you. I will give you the persona now.
     persona['persona'] += f"Your occupation is {chosen_occupation}.\n"
     persona['persona'] += f"You like {format_list(chosen_hobbies_interests)}.\n"
 
-def add_biography(persona, client, model="gpt-4o-mini", ignore_bio_love_hate=False, ignore_bio_party_identity=False, ignore_bio_voted2020=False):
+def add_biography(persona, client, model="gpt-4o-mini", ignore_bio_love_hate=False, ignore_bio_party_identity=False, ignore_bio_voted2020=False, token_usage: dict | None = None):
 
     prompt = f"""Write a very short (max. 140 characters), very informal social media biography for the following persona:
 
@@ -811,6 +815,10 @@ You may add things that are not in the persona. Do not use emoji. Write as if yo
         ],
         temperature=1.0,
     )
+
+    if token_usage is not None and response.usage is not None:
+        token_usage["input"] += response.usage.prompt_tokens
+        token_usage["output"] += response.usage.completion_tokens
 
     persona['biography'] = response.choices[0].message.content
 
@@ -881,10 +889,15 @@ def enrich_personas(
     ignore_bio_love_hate: bool = False,
     ignore_bio_party_identity: bool = False,
     ignore_bio_voted2020: bool = False,
+    token_usage: dict | None = None,
 ) -> list[dict]:
     """Extend each persona in place with AI-generated occupation/hobbies and a
     biography. Pure — no disk I/O. Up to 2 sequential OpenAI calls per persona (both
-    using `model`); the dominant cost/latency of persona generation."""
+    using `model`); the dominant cost/latency of persona generation.
+
+    When `token_usage` is given, its "input"/"output" keys are incremented by the
+    prompt/completion tokens used across all calls (caller-owned accumulator, so it
+    can be shared across multiple stages)."""
 
     dotenv.load_dotenv(os.path.join(SCRIPT_DIR, '..', '.env'))
     client = openai.OpenAI()
@@ -892,13 +905,14 @@ def enrich_personas(
     for i, persona in enumerate(personas, start=1):
         print(i)
         if not ignore_extend_with_ai:
-            extend_with_ai(persona, client, model=model)
+            extend_with_ai(persona, client, model=model, token_usage=token_usage)
         if not ignore_bio:
             add_biography(
                 persona, client, model=model,
                 ignore_bio_love_hate=ignore_bio_love_hate,
                 ignore_bio_party_identity=ignore_bio_party_identity,
                 ignore_bio_voted2020=ignore_bio_voted2020,
+                token_usage=token_usage,
             )
         else:
             persona['biography'] = None

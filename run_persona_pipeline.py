@@ -254,6 +254,7 @@ def main() -> None:
             **ablation_flags,
         )
         personas = anes_generate_personas.sample_personas(gen_args)
+        generation_tokens = {"input": 0, "output": 0}
         personas = anes_generate_personas.enrich_personas(
             personas,
             model=args.llm_model,
@@ -262,6 +263,7 @@ def main() -> None:
             ignore_bio_love_hate=ablation_flags["ignore_bio_love_hate"],
             ignore_bio_party_identity=ablation_flags["ignore_bio_party_identity"],
             ignore_bio_voted2020=ablation_flags["ignore_bio_voted2020"],
+            token_usage=generation_tokens,
         )
         print(f"Generated {len(personas)} personas.")
 
@@ -270,6 +272,7 @@ def main() -> None:
             wandb.log(interview_wandb.persona_population_metrics(pd.DataFrame(personas)))
 
         # --- Stage 2: Interview ---
+        interview_tokens = {"input": 0, "output": 0}
         if not args.skip_interview:
             persona_interviews.run_interview_for_setting(
                 personas_setting=personas_setting,
@@ -281,13 +284,15 @@ def main() -> None:
                 personas=personas,
                 own_wandb_run=False,
                 openrouter_api_key=args.openrouter_api_key,
+                token_usage=interview_tokens,
             )
         else:
             print("Skipping interview stage.")
 
         # --- Stage 3: Simulate ---
+        simulation_tokens = {"input": 0, "output": 0}
         if not args.skip_simulate:
-            simulation.run_simulation(
+            simulation_result = simulation.run_simulation(
                 simulation_size=args.num_personas,
                 simulation_steps=args.simulation_steps,
                 user_link_strategy=args.user_link_strategy,
@@ -308,10 +313,25 @@ def main() -> None:
                 hide_target_bio=args.hide_target_bio,
                 hide_news_category=args.hide_news_category,
             )
+            simulation_tokens = simulation_result
         else:
             print("Skipping simulation stage.")
 
+        # --- Whole-run token total (generate + interview + simulate) ---
+        pipeline_tokens_input = generation_tokens["input"] + interview_tokens["input"] + simulation_tokens["input"]
+        pipeline_tokens_output = generation_tokens["output"] + interview_tokens["output"] + simulation_tokens["output"]
+        print(f"Total tokens for seed {seed}: input={pipeline_tokens_input}, output={pipeline_tokens_output} "
+              f"(generation={generation_tokens}, interview={interview_tokens}, simulation={simulation_tokens})")
+
         if log:
+            wandb.summary["pipeline_tokens_input_generation"] = generation_tokens["input"]
+            wandb.summary["pipeline_tokens_output_generation"] = generation_tokens["output"]
+            wandb.summary["pipeline_tokens_input_interview"] = interview_tokens["input"]
+            wandb.summary["pipeline_tokens_output_interview"] = interview_tokens["output"]
+            wandb.summary["pipeline_tokens_input_simulation"] = simulation_tokens["input"]
+            wandb.summary["pipeline_tokens_output_simulation"] = simulation_tokens["output"]
+            wandb.summary["pipeline_tokens_input_total"] = pipeline_tokens_input
+            wandb.summary["pipeline_tokens_output_total"] = pipeline_tokens_output
             wandb.finish()
 
     if log:

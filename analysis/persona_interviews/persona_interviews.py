@@ -77,6 +77,7 @@ def _system_message(persona: dict, group_context: str = "") -> str:
 def ask_question(
     client: OpenAI, persona: dict, question: str, model: str,
     allow_dont_know: bool = False, group_context: str = "",
+    token_usage: dict | None = None,
 ) -> tuple[bool | str | None, str]:
     """Send a question to the LLM and return (answer, explanation).
 
@@ -110,6 +111,9 @@ def ask_question(
                 max_tokens=_max_tokens_for_model(model),
                 temperature=1.0,
             )
+            if token_usage is not None and response.usage is not None:
+                token_usage["input"] += response.usage.prompt_tokens
+                token_usage["output"] += response.usage.completion_tokens
             parsed = response.choices[0].message.parsed
             choice = parsed.choice.strip().lower()
             if choice == "dont_know":
@@ -137,6 +141,7 @@ def ask_question(
 
 def ask_feeling_thermometer_single(
     client: OpenAI, persona: dict, label: str, model: str, group_context: str = "",
+    token_usage: dict | None = None,
 ) -> tuple[bool | None, int | None]:
     """Rate a single thermometer target in its own call, with no other target in context."""
 
@@ -159,6 +164,9 @@ def ask_feeling_thermometer_single(
                 max_tokens=_max_tokens_for_model(model),
                 temperature=1.0,
             )
+            if token_usage is not None and response.usage is not None:
+                token_usage["input"] += response.usage.prompt_tokens
+                token_usage["output"] += response.usage.completion_tokens
             parsed = response.choices[0].message.parsed
             return parsed.recognized, parsed.rating
         except (LengthFinishReasonError, ValidationError):
@@ -173,13 +181,16 @@ def ask_feeling_thermometer_single(
 
 def ask_feeling_thermometer(
     client: OpenAI, persona: dict, targets: list[tuple[str, str]], model: str, group_context: str = "",
+    token_usage: dict | None = None,
 ) -> dict:
     """Rate each thermometer target with a separate call (avoids order/anchoring
     effects from batching multiple targets into one comparative call)."""
 
     row = {}
     for role, label in targets:
-        recognized, rating = ask_feeling_thermometer_single(client, persona, label, model, group_context)
+        recognized, rating = ask_feeling_thermometer_single(
+            client, persona, label, model, group_context, token_usage=token_usage,
+        )
         row[f"{role}_therm_recognized"] = recognized
         row[f"{role}_therm_rating"]     = rating
         print(f"    [id={persona.get('persona_index')}] [{role}_therm] recognized={recognized!r} rating={rating!r}")
@@ -196,12 +207,17 @@ def interview_personas(
     seed: int = 42,
     group_context: str = "",
     openrouter_api_key: int | None = None,
+    token_usage: dict | None = None,
 ) -> pd.DataFrame:
     """Interview either an in-memory `personas` list, or (when not given) the
     personas loaded from `personas_file`.
 
     `openrouter_api_key` selects which of OPENROUTER_API_KEY_{1,2,3} to use
-    (defaults to 1), so parallel runs can be spread across separate keys."""
+    (defaults to 1), so parallel runs can be spread across separate keys.
+
+    When `token_usage` is given, its "input"/"output" keys are incremented by the
+    prompt/completion tokens used across every call in this run (caller-owned
+    accumulator, so it can be shared across multiple seeds/stages)."""
 
     dotenv.load_dotenv(os.path.join(os.path.dirname(__file__), "../../.env"))
 
@@ -258,12 +274,15 @@ def interview_personas(
             answer, explanation = ask_question(
                 client, persona, question, model,
                 allow_dont_know=allow_dont_know, group_context=group_context,
+                token_usage=token_usage,
             )
             row[f"{key}_answer"]      = answer          # True / False / "dont_know"
             row[f"{key}_explanation"] = explanation
             print(f"    [id={persona_id}] [{key}] {answer!r} — {explanation}")
 
-        row.update(ask_feeling_thermometer(client, persona, thermometer_targets, model, group_context))
+        row.update(ask_feeling_thermometer(
+            client, persona, thermometer_targets, model, group_context, token_usage=token_usage,
+        ))
 
         results.append(row)
 
@@ -409,6 +428,7 @@ def run_interview_for_setting(
     personas: list[dict] | None = None,
     own_wandb_run: bool = True,
     openrouter_api_key: int | None = None,
+    token_usage: dict | None = None,
 ) -> dict:
     """Interview personas, once per seed, logging each seed's raw per-persona results
     to wandb. `personas_setting` is always required (even when `personas` is supplied
@@ -425,7 +445,10 @@ def run_interview_for_setting(
     run), this skips its own `wandb.init`/`wandb.finish()` per seed and instead logs
     into whatever wandb run is already active — for that case, `seeds` should be a
     single-element list, since the caller owns one run per seed. Returns identifying
-    info about the run(s) that were logged."""
+    info about the run(s) that were logged, including cumulative "tokens_input"/
+    "tokens_output" across every seed in this call. When `token_usage` is given
+    (caller-owned accumulator dict with "input"/"output" keys), it's incremented in
+    place too, so it can be shared with other pipeline stages for a combined total."""
 
     trump_label, biden_label = get_political_figure_labels(personas_setting)
     democrats_label, republicans_label = get_party_labels(personas_setting)
@@ -462,6 +485,7 @@ def run_interview_for_setting(
 
     group = wandb_group or uuid.uuid4().hex[:8]
     run_ids = []
+    usage = token_usage if token_usage is not None else {"input": 0, "output": 0}
 
     if persona_sample is None and len(seeds) > 1:
         print("Note: --persona_sample not set, so each seed re-interviews the full "
@@ -482,6 +506,7 @@ def run_interview_for_setting(
                 reinit=True,
             )
 
+        seed_usage_before = dict(usage)
         df = interview_personas(
             personas_file=personas_file,
             personas=personas,
@@ -492,12 +517,15 @@ def run_interview_for_setting(
             seed=seed,
             group_context=group_context,
             openrouter_api_key=openrouter_api_key,
+            token_usage=usage,
         )
 
         if log:
             interview_wandb.upload_results_artifact(df, name=f"interview-results-{obfuscation}-seed{seed}")
             metrics = interview_wandb.persona_population_metrics(df)
             metrics.update(interview_wandb.result_metrics(df, questions, thermometer_targets))
+            metrics["tokens_input"] = usage["input"] - seed_usage_before["input"]
+            metrics["tokens_output"] = usage["output"] - seed_usage_before["output"]
             # In addition to the downloadable CSV artifact above, log the same
             # per-persona rows (individual answers + explanations) as a wandb
             # Table, so they're browsable/sortable/filterable in the run's UI
@@ -520,7 +548,13 @@ def run_interview_for_setting(
         # where the data actually went (the caller owns and reports that instead).
         print(f"Logged {len(seeds)} run(s) to wandb project '{wandb_project}' (group={group})")
 
-    return {"group": group, "obfuscation": obfuscation, "run_ids": run_ids}
+    return {
+        "group": group,
+        "obfuscation": obfuscation,
+        "run_ids": run_ids,
+        "tokens_input": usage["input"],
+        "tokens_output": usage["output"],
+    }
 
 
 def main() -> None:

@@ -84,7 +84,7 @@ def parse_args() -> argparse.Namespace:
                               "(printed by run_persona_pipeline.py after it finishes — "
                               "pass the same --batch_id across multiple invocations, "
                               "one per --obfuscation value, to populate this batch).")
-    parser.add_argument("--wandb_project", type=str, default=interview_wandb.WANDB_PROJECT,
+    parser.add_argument("--wandb_project", type=str, default='persona-simulation',
                          help="Wandb project the runs were logged to.")
     return parser.parse_args()
 

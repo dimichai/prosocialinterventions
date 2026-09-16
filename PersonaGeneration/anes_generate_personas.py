@@ -890,6 +890,7 @@ def enrich_personas(
     ignore_bio_party_identity: bool = False,
     ignore_bio_voted2020: bool = False,
     token_usage: dict | None = None,
+    openrouter_api_key: int | None = None,
 ) -> list[dict]:
     """Extend each persona in place with AI-generated occupation/hobbies and a
     biography. Pure — no disk I/O. Up to 2 sequential OpenAI calls per persona (both
@@ -897,10 +898,19 @@ def enrich_personas(
 
     When `token_usage` is given, its "input"/"output" keys are incremented by the
     prompt/completion tokens used across all calls (caller-owned accumulator, so it
-    can be shared across multiple stages)."""
+    can be shared across multiple stages).
+
+    `openrouter_api_key` selects which of OPENROUTER_API_KEY_{1,2,3} to route through
+    OpenRouter (for non-OpenAI models); when omitted, calls go straight to OpenAI."""
 
     dotenv.load_dotenv(os.path.join(SCRIPT_DIR, '..', '.env'))
-    client = openai.OpenAI()
+    if openrouter_api_key is not None:
+        client = openai.OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=os.getenv(f"OPENROUTER_API_KEY_{openrouter_api_key}"),
+        )
+    else:
+        client = openai.OpenAI()
 
     for i, persona in enumerate(personas, start=1):
         print(i)

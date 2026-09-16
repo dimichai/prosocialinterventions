@@ -264,6 +264,7 @@ def main() -> None:
             ignore_bio_party_identity=ablation_flags["ignore_bio_party_identity"],
             ignore_bio_voted2020=ablation_flags["ignore_bio_voted2020"],
             token_usage=generation_tokens,
+            openrouter_api_key=args.openrouter_api_key,
         )
         print(f"Generated {len(personas)} personas.")
 

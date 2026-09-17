@@ -344,7 +344,7 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
         if own_wandb_run:
             wandb.finish()
 
-    return {"tokens_input": total_tokens_input, "tokens_output": total_tokens_output}
+    return {"input": total_tokens_input, "output": total_tokens_output}
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser()

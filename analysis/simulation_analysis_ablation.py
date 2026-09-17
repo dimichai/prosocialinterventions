@@ -21,16 +21,42 @@ DEFAULT_WANDB_PROJECT = "persona-simulation"
 
 # Colorblind-validated categorical palette; ablation combos are an open-ended set
 # (unlike obfuscation's fixed 5), so this is extended by repeating if a batch has
-# more conditions than colors.
+# more conditions than colors, for any label not covered by CUSTOM_ABLATION_COLORS.
 CONDITION_PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#7d5ba6", "#4c6663", "#c1666b"]
 
 
+# Human-readable labels for the additive AP/PID/VB ablation chain (see
+# run_persona_pipeline.py's --ablations). Combos not listed here (e.g. an
+# ablation batch outside this chain) fall back to a generic "+"-joined label.
+# (Duplicated from persona_interviews_analysis_ablation.py — small enough that
+# keeping the interview- and simulation-analysis scripts independent of each
+# other outweighs sharing this.)
+CUSTOM_ABLATION_LABELS = {
+    ("extend_with_ai",): "Full Persona",
+    ("extend_with_ai", "love_hate"): "No AP",
+    ("extend_with_ai", "love_hate", "party_identity"): "No AP & PID",
+    ("extend_with_ai", "love_hate", "party_identity", "voted2020"): "No AP & PID & VB",
+}
+
+# Same colors as the 'persona' group's settings_config in dimi_analysis.py, keyed
+# by the labels above, so this chain reads as the same conditions across figures.
+CUSTOM_ABLATION_COLORS = {
+    "Full Persona": "#4878A8",
+    "No AP": "#2D7D2D",
+    "No AP & PID": "#5AAD5A",
+    "No AP & PID & VB": "#8DD38D",
+}
+
+
 def ablation_label(ablations: tuple[str, ...]) -> str:
-    """Display label for one ablation combo — 'None' for the baseline (no
-    ablations), else the sorted ablation names joined with '+'. (Duplicated from
+    """Display label for one ablation combo — a fixed label for recognized
+    combos (see CUSTOM_ABLATION_LABELS), else 'None' for the baseline (no
+    ablations) or the sorted ablation names joined with '+'. (Duplicated from
     persona_interviews_analysis_ablation.py — small enough that keeping the
     interview- and simulation-analysis scripts independent of each other outweighs
     sharing this one-line function.)"""
+    if ablations in CUSTOM_ABLATION_LABELS:
+        return CUSTOM_ABLATION_LABELS[ablations]
     return "None" if not ablations else "+".join(ablations)
 
 
@@ -74,7 +100,14 @@ def main() -> None:
     print(f"Found conditions: {labels}")
 
     data, raw_data = fetch_and_aggregate(runs_by_condition)
-    condition_colors = {l: CONDITION_PALETTE[i % len(CONDITION_PALETTE)] for i, l in enumerate(labels)}
+    palette_idx = 0
+    condition_colors = {}
+    for label in labels:
+        if label in CUSTOM_ABLATION_COLORS:
+            condition_colors[label] = CUSTOM_ABLATION_COLORS[label]
+        else:
+            condition_colors[label] = CONDITION_PALETTE[palette_idx % len(CONDITION_PALETTE)]
+            palette_idx += 1
 
     fig, axes = plt.subplots(1, len(METRICS), figsize=(5 * len(METRICS), 4.5))
     plot_metrics_comparison(axes, labels, condition_colors, data, raw_data=raw_data)

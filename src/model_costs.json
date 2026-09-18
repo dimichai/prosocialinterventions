@@ -19,6 +19,11 @@
         "output": 0.12,
         "cached_input": 0.06
     },
+    "mistralai/mistral-small-2603": {
+        "input": 0.15,
+        "output": 0.60,
+        "cached_input": 0.015
+    },
     "meta-llama/llama-3.3-70b-instruct": {
         "input": 0.10,
         "output": 0.32,

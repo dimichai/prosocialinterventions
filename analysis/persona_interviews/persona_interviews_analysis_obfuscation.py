@@ -11,13 +11,27 @@ import interview_wandb  # noqa: E402
 import persona_interviews as interview  # noqa: E402
 from interview_comparison_plots import (  # noqa: E402
     TRAIT_QUESTIONS,
+    POSITIVE_TRAIT_QUESTIONS,
+    NEGATIVE_TRAIT_QUESTIONS,
     QUESTIONS,
+    GAP_ROLE_MAPS,
+    FOLLOW_GAP_ROLE_MAPS,
+    TRAIT_GAP_ROLE_MAPS,
+    TRAIT_DONT_KNOW_ROLES,
     fig_path,
     aggregate_population_metrics,
+    aggregate_ground_truth_thermometer,
     print_population_table,
     print_question_tables,
-    plot_metric_comparison,
-    plot_thermometer_comparison,
+    print_thermometer_table,
+    print_ground_truth_thermometer_table,
+    print_ground_truth_gap_table,
+    print_gap_comparison_table,
+    plot_metric_grouped_bar_comparison,
+    plot_gap_grouped_bar_comparison,
+    plot_role_average_grouped_bar_comparison,
+    plot_trait_gap_heatmap,
+    party_color_map,
 )
 
 # obfuscation (config value) -> comparison-plot display label, in a fixed display
@@ -33,7 +47,7 @@ OBFUSCATION_LABELS = {
 
 def fetch_condition_dfs(
     batch_id: str, wandb_project: str = interview_wandb.WANDB_PROJECT
-) -> tuple[dict[str, pd.DataFrame], dict[str, dict[str, tuple[float, float]]]]:
+) -> tuple[dict[str, pd.DataFrame], dict[str, dict[str, tuple[float, float]]], dict[str, dict[str, tuple[float, float]]]]:
     """Fetch every wandb run sharing `batch_id` (one run per obfuscation x seed —
     run_persona_pipeline.py's --obfuscation is one condition per invocation, so pass
     the same --batch_id across multiple invocations, one per condition, to populate a
@@ -42,10 +56,15 @@ def fetch_condition_dfs(
     `load_and_prepare` used to return from a pre-aggregated local CSV, just sourced
     from wandb instead.
 
-    Returns (dfs, population), where `dfs` maps condition label -> aggregated
-    question/thermometer results (as before) and `population` maps condition
+    Returns (dfs, population, ground_truth), where `dfs` maps condition label ->
+    aggregated question/thermometer results (as before), `population` maps condition
     label -> aggregated persona-population attribute stats (see
-    `aggregate_population_metrics`)."""
+    `aggregate_population_metrics`), and `ground_truth` maps thermometer role ->
+    party -> (value, 95%-CI half-width) of real ANES respondents' own rating (see
+    `aggregate_ground_truth_thermometer`) — computed once, from the "No Obfuscation"
+    condition, since it's identical across obfuscation conditions sharing a seed
+    (obfuscating a persona's own description doesn't change the real respondent
+    behind it)."""
     runs = interview_wandb.fetch_runs_by_group(wandb_project, batch_id)
     if not runs:
         raise RuntimeError(f"No wandb runs found in project '{wandb_project}' for group '{batch_id}'.")
@@ -56,6 +75,7 @@ def fetch_condition_dfs(
 
     dfs = {}
     population = {}
+    ground_truth = None
     for obfuscation, label in OBFUSCATION_LABELS.items():
         condition_runs = runs_by_obfuscation.get(obfuscation)
         if not condition_runs:
@@ -70,8 +90,10 @@ def fetch_condition_dfs(
         )
         dfs[label] = interview.aggregate_interview_runs(raw_dfs, questions, thermometer_targets)
         population[label] = aggregate_population_metrics(raw_dfs)
+        if obfuscation == "none":
+            ground_truth = aggregate_ground_truth_thermometer(raw_dfs)
 
-    return dfs, population
+    return dfs, population, ground_truth
 
 
 def parse_args() -> argparse.Namespace:
@@ -91,7 +113,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    dfs, population = fetch_condition_dfs(args.batch_id, wandb_project=args.wandb_project)
+    dfs, population, ground_truth = fetch_condition_dfs(args.batch_id, wandb_project=args.wandb_project)
 
     print_population_table(population)
 
@@ -129,37 +151,113 @@ def main() -> None:
     all_keys = follow_keys + trait_keys
 
     all_parties = sorted(set().union(*[set(df["party"].dropna().unique()) for df in dfs.values()]))
-    labels      = list(dfs.keys())
 
-    # Colorblind-validated categorical palette (fixed order, not cycled):
-    # blue, orange, aqua, yellow, magenta.
-    condition_colors = {l: c for l, c in zip(labels, ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"])}
+    party_colors = party_color_map(all_parties)
 
     # Obfuscation conditions are distinct schemes, not a progressive/additive series
-    # (unlike the ablation comparison), so a grouped bar chart per condition
-    # is the honest comparison — a connecting line would imply an ordering that isn't there.
-    plot_metric_comparison(dfs, follow_present, all_parties, condition_colors,
-                            fig_path("interview_results_obfuscation", args.batch_id), "question", "pct_yes_mean", "pct_yes_std",
-                            ncols=3)
-    # Trait battery: one row per trait, Democrats and Republicans side by side
-    # (trait_keys is already interleaved dem/rep, so a 2-column grid lines up
-    # each trait's pair of panels instead of splitting all-dem/all-rep onto
-    # separate rows). Each cell also carries its don't-know rate (small "dk NN%"
-    # label, top-right of the bar) — makes forced-choice artifacts (non-partisans
-    # with no basis to judge an obfuscated group) visible in this same chart
-    # instead of a separate one.
-    plot_metric_comparison(dfs, trait_present, all_parties, condition_colors,
-                            fig_path("interview_results_obfuscation_traits", args.batch_id), "question", "pct_yes_mean", "pct_yes_std",
-                            ncols=2, show_dont_know=True)
+    # (unlike the ablation comparison), so each chart below is a grouped bar chart —
+    # one cluster of bars per condition, colored by party — rather than a slope
+    # chart connecting conditions with a line, which would imply an ordering that
+    # isn't there. Coloring by party (matching the ablation script's line colors)
+    # still lets you compare Democrats vs. Republicans at a glance within a
+    # condition, and compare a party across conditions by its color, same as the
+    # two comparisons a slope chart offers.
+    plot_metric_grouped_bar_comparison(dfs, follow_present, all_parties, party_colors,
+                                        fig_path("interview_results_obfuscation", args.batch_id),
+                                        "question", "pct_yes_mean", "pct_yes_std", ncols=3)
+
+    # Follow gap: Pr(follow in-party) - Pr(follow out-party), and the
+    # analogous gap between agents who love vs. hate each candidate — see
+    # FOLLOW_GAP_ROLE_MAPS.
+    plot_gap_grouped_bar_comparison(dfs, FOLLOW_GAP_ROLE_MAPS, all_parties, party_colors,
+                                     fig_path("interview_results_obfuscation_follow_gap", args.batch_id),
+                                     ncols=3, value_label="Follow gap",
+                                     ylim=(-1, 1), metric="question", value_col="pct_yes_mean", std_col="pct_yes_std")
+    print_gap_comparison_table(dfs, FOLLOW_GAP_ROLE_MAPS["Party"], all_parties,
+                                "Follow gap (party): Pr(follow in-party) - Pr(follow out-party)",
+                                metric="question", value_col="pct_yes_mean", std_col="pct_yes_std")
+    print_gap_comparison_table(dfs, FOLLOW_GAP_ROLE_MAPS["Biden"], all_parties,
+                                "Follow gap (Biden): Pr(follow lover) - Pr(follow hater)",
+                                metric="question", value_col="pct_yes_mean", std_col="pct_yes_std")
+    print_gap_comparison_table(dfs, FOLLOW_GAP_ROLE_MAPS["Trump"], all_parties,
+                                "Follow gap (Trump): Pr(follow lover) - Pr(follow hater)",
+                                metric="question", value_col="pct_yes_mean", std_col="pct_yes_std")
+
+    plot_metric_grouped_bar_comparison(dfs, trait_present, all_parties, party_colors,
+                                        fig_path("interview_results_obfuscation_traits", args.batch_id),
+                                        "question", "pct_yes_mean", "pct_yes_std", ncols=2)
+    # Don't-know rate as its own chart, rather than annotated on the yes-rate
+    # panels, so forced-choice artifacts (respondents with no basis to judge a
+    # party) are visible instead of defaulting into the "No" bar.
+    plot_metric_grouped_bar_comparison(dfs, trait_present, all_parties, party_colors,
+                                        fig_path("interview_results_obfuscation_traits_dont_know", args.batch_id),
+                                        "question", "pct_dont_know_mean", "pct_dont_know_std", ncols=2,
+                                        value_label='Fraction answering "don\'t know"')
 
     print(f"\n{'='*60}")
     print("  Question answers (rows = obfuscation condition, columns = party)")
     print(f"{'='*60}")
     print_question_tables(dfs, all_keys, all_parties, question_labels, question_texts, trait_keys)
 
-    plot_thermometer_comparison(dfs, all_parties, condition_colors,
-                                 fig_path("interview_results_obfuscation_thermometer", args.batch_id),
-                                 therm_title_suffix="\n(obfuscated per condition)")
+    therm_role_labels = [
+        ("democrats", "Democrats"),
+        ("biden", "Biden"),
+        ("republicans", "Republicans"),
+        ("trump", "Trump"),
+    ]
+    therm_present = [
+        (role, f"Feeling thermometer:\n{label}\n(obfuscated per condition)") for role, label in therm_role_labels
+        if all(((df["metric"] == "thermometer") & (df["key"] == role)).any() for df in dfs.values())
+    ]
+    plot_metric_grouped_bar_comparison(dfs, therm_present, all_parties, party_colors,
+                                        fig_path("interview_results_obfuscation_thermometer", args.batch_id),
+                                        "thermometer", "rating_mean", "rating_std", ncols=4,
+                                        value_label="Mean rating (0-100)", ylim=(0, 100),
+                                        ground_truth=ground_truth)
+    print_thermometer_table(dfs, therm_role_labels, all_parties)
+    if ground_truth:
+        print_ground_truth_thermometer_table(ground_truth, therm_role_labels, all_parties)
+
+    # Thermometer gap T_in - T_out (own-side minus opposing-side rating), the
+    # standard affective-polarization measure, reported for parties and
+    # candidates separately plus their combined average — see GAP_ROLE_MAPS.
+    plot_gap_grouped_bar_comparison(dfs, GAP_ROLE_MAPS, all_parties, party_colors,
+                                     fig_path("interview_results_obfuscation_thermometer_gap", args.batch_id),
+                                     ncols=3, ylim=(-20, 100), ground_truth=ground_truth)
+    for title in GAP_ROLE_MAPS:
+        print_gap_comparison_table(dfs, GAP_ROLE_MAPS[title], all_parties,
+                                    "Thermometer gap",
+                                    metric="thermometer", value_col="rating_mean", std_col="rating_std")
+    if ground_truth:
+        print_ground_truth_gap_table(ground_truth, GAP_ROLE_MAPS, all_parties)
+
+    # Trait differential: the share of positive (resp. negative) traits a
+    # party's respondents attribute to their own party minus the share they
+    # attribute to the opposing party — don't-know responses reported as
+    # their own rate rather than recoded into the differential.
+    plot_gap_grouped_bar_comparison(dfs, TRAIT_GAP_ROLE_MAPS, all_parties, party_colors,
+                                     fig_path("interview_results_obfuscation_trait_differential", args.batch_id),
+                                     ncols=2, value_label="Trait gap",
+                                     ylim=(-1, 1), metric="question", value_col="pct_yes_mean", std_col="pct_yes_std")
+    plot_role_average_grouped_bar_comparison(dfs, TRAIT_DONT_KNOW_ROLES, all_parties, party_colors,
+                                              fig_path("interview_results_obfuscation_trait_differential_dont_know", args.batch_id),
+                                              ncols=2, value_label='Fraction answering "don\'t know"', ylim=(0, 1))
+    # Same trait gap, broken out per individual trait rather than aggregated
+    # across the whole positive/negative battery — a compact heatmap (rows =
+    # trait, columns = condition) rather than one bar/slope panel per trait,
+    # which doesn't scale past a handful of traits. Paper-table-friendly.
+    plot_trait_gap_heatmap(dfs, POSITIVE_TRAIT_QUESTIONS + NEGATIVE_TRAIT_QUESTIONS,
+                            fig_path("interview_results_obfuscation_trait_gap_heatmap", args.batch_id),
+                            parties=("Democrat", "Republican"),
+                            separator_after=len(POSITIVE_TRAIT_QUESTIONS) - 1)
+    print_gap_comparison_table(dfs, TRAIT_GAP_ROLE_MAPS["Positive traits"], all_parties,
+                                "Positive traits: share(in-party) - share(out-party)",
+                                metric="question", value_col="pct_yes_mean", std_col="pct_yes_std",
+                                dont_know_roles=TRAIT_DONT_KNOW_ROLES["Positive traits"])
+    print_gap_comparison_table(dfs, TRAIT_GAP_ROLE_MAPS["Negative traits"], all_parties,
+                                "Negative traits: share(in-party) - share(out-party)",
+                                metric="question", value_col="pct_yes_mean", std_col="pct_yes_std",
+                                dont_know_roles=TRAIT_DONT_KNOW_ROLES["Negative traits"])
 
 
 if __name__ == "__main__":

@@ -28,6 +28,7 @@ from interview_comparison_plots import (  # noqa: E402
     print_gap_comparison_table,
     plot_slope_comparison,
     plot_gap_slope_comparison,
+    plot_gap_slope_rows,
     plot_role_average_comparison,
     party_color_map,
 )
@@ -253,11 +254,23 @@ def main() -> None:
     }
     plot_gap_slope_comparison(dfs, trait_gap_role_maps, all_parties, party_colors,
                                fig_path("interview_results_ablation_trait_differential_no_openminded", args.batch_id),
-                               ncols=2, value_label="Trait differential",
+                               ncols=2, value_label="Trait gap",
                                ylim=(-1, 1), metric="question", value_col="pct_yes_mean", std_col="pct_yes_std")
     plot_role_average_comparison(dfs, trait_dont_know_role_sets, all_parties, party_colors,
                                   fig_path("interview_results_ablation_trait_differential_no_openminded_dont_know", args.batch_id),
                                   ncols=2, value_label='Fraction answering "don\'t know"', ylim=(0, 1))
+
+    # Combined figure: thermometer gap (party/candidate only, no "Combined"
+    # panel) on the top row, trait gap (open-mindedness excluded) below —
+    # each row on its own y-scale.
+    plot_gap_slope_rows(dfs, [
+        dict(panels={t: GAP_ROLE_MAPS[t] for t in ("Party", "Candidate")},
+             value_label="Thermometer gap", ylim=(-20, 100), ground_truth=ground_truth,
+             metric="thermometer", value_col="rating_mean", std_col="rating_std"),
+        dict(panels=trait_gap_role_maps, value_label="Trait gap", ylim=(-1, 1),
+             metric="question", value_col="pct_yes_mean", std_col="pct_yes_std"),
+    ], all_parties, party_colors,
+        fig_path("interview_results_ablation_thermometer_and_trait_gap", args.batch_id))
     print_gap_comparison_table(dfs, trait_gap_role_maps["Positive traits"], all_parties,
                                 "Positive traits: share(in-party) - share(out-party)",
                                 metric="question", value_col="pct_yes_mean", std_col="pct_yes_std",

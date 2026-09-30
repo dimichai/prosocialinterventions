@@ -10,11 +10,17 @@ import matplotlib.pyplot as plt  # noqa: E402
 
 import interview_wandb  # noqa: E402
 from simulation_comparison_plots import (  # noqa: E402
-    METRICS,
+    NETWORK_METRICS,
+    CORRELATION_METRICS,
     fig_path,
     fetch_and_aggregate,
     plot_metrics_comparison,
+    download_platform,
+    plot_networks,
 )
+
+# Metrics fetched from wandb — the union of both charts' panels below.
+ALL_METRICS = {**NETWORK_METRICS, **CORRELATION_METRICS}
 
 # run_persona_pipeline.py's default --wandb_project.
 DEFAULT_WANDB_PROJECT = "persona-simulation"
@@ -77,25 +83,44 @@ def main() -> None:
     labels = list(runs_by_condition.keys())
     print(f"Found conditions: {labels}")
 
-    data, raw_data = fetch_and_aggregate(runs_by_condition)
+    data, raw_data = fetch_and_aggregate(runs_by_condition, metrics=ALL_METRICS)
     condition_colors = {l: CONDITION_PALETTE[i % len(CONDITION_PALETTE)] for i, l in enumerate(labels)}
 
-    fig, axes = plt.subplots(1, len(METRICS), figsize=(5 * len(METRICS), 4.5))
-    plot_metrics_comparison(axes, labels, condition_colors, data, raw_data=raw_data)
-    fig.suptitle("Simulation metrics by obfuscation condition")
-    fig.tight_layout()
+    for base_name, title, metrics in [
+        ("simulation_results_obfuscation_network", "Network structure by obfuscation condition", NETWORK_METRICS),
+        ("simulation_results_obfuscation_correlations", "Correlations/inequality by obfuscation condition", CORRELATION_METRICS),
+    ]:
+        fig, axes = plt.subplots(1, len(metrics), figsize=(5 * len(metrics), 4.5))
+        plot_metrics_comparison(axes, labels, condition_colors, data, raw_data=raw_data, metrics=metrics)
+        fig.suptitle(title)
+        fig.tight_layout()
 
-    out_path = fig_path("simulation_results_obfuscation", args.batch_id)
-    fig.savefig(out_path)
-    fig.savefig(fig_path("simulation_results_obfuscation", args.batch_id, ext="png"))
-    plt.close(fig)
-    print(f"Saved to {out_path}")
+        out_path = fig_path(base_name, args.batch_id)
+        fig.savefig(out_path)
+        fig.savefig(fig_path(base_name, args.batch_id, ext="png"))
+        plt.close(fig)
+        print(f"Saved to {out_path}")
+
+    # --- Network diagrams (need each condition's platform artifact) ---
+    platforms = {}
+    for label in labels:
+        try:
+            platforms[label] = download_platform(runs_by_condition[label][0])
+        except RuntimeError as e:
+            print(f"  {label}: {e}")
+
+    network_labels = [l for l in labels if l in platforms]
+    if network_labels:
+        plot_networks(network_labels, platforms,
+                       fig_path("simulation_results_obfuscation_networks", args.batch_id))
+    else:
+        print("  No platform artifacts found, skipping network diagrams.")
 
     print(f"\n{'='*60}")
     print("  Simulation metrics (rows = obfuscation condition)")
     print(f"{'='*60}")
     for label in labels:
-        row = "  ".join(f"{m}={data[label][m]:.4f} ± {data[label][f'{m}_se']:.4f}" for m in METRICS)
+        row = "  ".join(f"{m}={data[label][m]:.4f} ± {data[label][f'{m}_se']:.4f}" for m in ALL_METRICS)
         print(f"  {label:<20} {row}")
 
 

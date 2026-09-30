@@ -45,6 +45,10 @@ REASONING_MODEL_MAX_TOKENS = 32768
 # `enabled: false` rather than `effort: "none"`.
 NO_REASONING_MODEL_PREFIXES = ("deepseek",)
 
+# GPT-6-family models (e.g. openai/gpt-6-luna) do support effort "none", so
+# reasoning is switched off that way to keep them comparable in the ablation.
+NONE_EFFORT_MODEL_PREFIXES = ("gpt-6", "openai/gpt-6")
+
 
 def _max_tokens_for_model(model: str) -> int:
     if model.lower().startswith(REASONING_MODEL_PREFIXES):
@@ -55,6 +59,8 @@ def _max_tokens_for_model(model: str) -> int:
 def _extra_body_for_model(model: str) -> dict:
     if model.lower().startswith(NO_REASONING_MODEL_PREFIXES):
         return {"reasoning": {"enabled": False}}
+    if model.lower().startswith(NONE_EFFORT_MODEL_PREFIXES):
+        return {"reasoning": {"effort": "none"}}
     return {}
 
 

@@ -9,13 +9,23 @@ settings) in favor of condition labels/colors passed in explicitly.
 """
 
 import math
+import os
+import pickle
+import sys
 import time
 from collections import defaultdict
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import networkx as nx
 import numpy as np
 from scipy.stats import mannwhitneyu
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "persona_interviews"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+from interview_comparison_plots import PARTY_COLORS  # noqa: E402
+import Platform  # noqa: E402,F401  (must be importable under this name to unpickle a platform artifact)
 
 plt.rcParams.update({
     # Font
@@ -65,11 +75,33 @@ plt.rcParams.update({
 FIGS_DIR = Path(__file__).parent / "figs"
 FIGS_DIR.mkdir(exist_ok=True)
 
+# Shared with persona_simulation_analysis_ablation.py's platform-artifact cache,
+# so a run downloaded for one comparison is reused by the other.
+PLATFORM_CACHE_DIR = Path(__file__).parent / "persona_interviews" / "wandb_cache"
+
 # Same metric set dimi_analysis.py already established for simulation comparisons.
 METRICS = {
     'EI_index': 'EI Index',
     'avg_clustering_coefficient': 'Avg. Clustering Coefficient',
     'correlation_retweets_partisan': 'Correlation Retweets - Partisanship',
+}
+
+# Network-structure metrics (see compute_metrics in src/main.py) — one chart.
+NETWORK_METRICS = {
+    'EI_index_dem_rep': 'EI Index (Dem/Rep)',
+    'modularity_dem_rep': 'Modularity (Dem/Rep)',
+    'network_reciprocity': 'Network Reciprocity',
+    'network_density': 'Network Density',
+    'avg_clustering_coefficient': 'Avg. Clustering Coefficient',
+}
+
+# Correlation/inequality metrics (see compute_metrics in src/main.py) — a
+# separate chart from NETWORK_METRICS.
+CORRELATION_METRICS = {
+    'correlation_retweets_partisan': 'Correlation Retweets - Partisanship',
+    'correlation_followers_partisan': 'Correlation Followers - Partisanship',
+    'gini_followers': 'Gini Coefficient (Followers)',
+    'gini_reposts': 'Gini Coefficient (Reposts)',
 }
 
 
@@ -125,6 +157,59 @@ def _to_float(val):
         return float(val)
     except (TypeError, ValueError):
         return None
+
+
+def download_platform(run, cache_dir: Path = PLATFORM_CACHE_DIR):
+    """Download (or reuse a cached copy of) a run's platform artifact and unpickle
+    it — one directory per run.id (same caching pattern as
+    interview_wandb.download_results_dataframe)."""
+    run_dir = cache_dir / run.id
+    pkl_files = list(run_dir.glob("*.pkl"))
+    if not pkl_files:
+        artifacts = [a for a in run.logged_artifacts() if a.type == "platform"]
+        if not artifacts:
+            raise RuntimeError(f"Run '{run.id}' has no logged platform artifact.")
+        artifacts[0].download(root=str(run_dir))
+        pkl_files = list(run_dir.glob("*.pkl"))
+    with open(pkl_files[0], "rb") as f:
+        return pickle.load(f)
+
+
+def plot_networks(labels: list[str], platforms: dict, output_path: str) -> None:
+    """One network diagram per condition, nodes colored by party."""
+    n = len(labels)
+    fig, axes = plt.subplots(1, n, figsize=(4 * n, 4))
+    if n == 1:
+        axes = [axes]
+
+    for idx, label in enumerate(labels):
+        platform = platforms[label]
+        G = nx.DiGraph()
+        G.add_nodes_from(user.identifier for user in platform.users)
+        G.add_edges_from(platform.user_links)
+        # Isolates (users who never followed/were followed) carry no structure and
+        # just pile up in the middle of the layout.
+        G.remove_nodes_from(list(nx.isolates(G)))
+
+        party_by_id = {user.identifier: user.persona.get('party', '') for user in platform.users}
+        node_colors = [PARTY_COLORS.get(party_by_id[n], '#999999') for n in G]
+
+        # Lay out on the undirected graph: Kamada-Kawai on the DiGraph uses directed
+        # shortest paths, so most pairs are "unreachable" and the layout loses the
+        # party communities (an EI of -0.8 network rendered as fully mixed).
+        pos = nx.kamada_kawai_layout(G.to_undirected())
+
+        ax = axes[idx]
+        nx.draw(G, pos, ax=ax, node_color=node_colors, edgecolors='black',
+                node_size=100, width=1.0, linewidths=0.5)
+        panel_letter = chr(ord('A') + idx)
+        ax.set_title(f"({panel_letter}) {label}", pad=10)
+
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
+    fig.savefig(str(output_path).replace('.pdf', '.png'), dpi=300, bbox_inches='tight', facecolor='white')
+    plt.close(fig)
+    print(f"Saved to {output_path}")
 
 
 def fetch_and_aggregate(

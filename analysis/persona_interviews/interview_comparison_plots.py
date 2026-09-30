@@ -10,6 +10,7 @@ import math
 import os
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 import interview_wandb  # noqa: E402
@@ -401,175 +402,8 @@ def _print_comparison_table(
     print(table.to_string().replace("\n", "\n  "))
 
 
-def _draw_table_panel(
-    fig: plt.Figure,
-    outer_spec,
-    labels: list[str],
-    columns: list[str],
-    condition_colors: dict[str, str],
-    value_fn,
-    xlim: tuple[float, float],
-    title: str,
-    value_fmt: str = "{:.0%}",
-    secondary_fn=None,
-    secondary_prefix: str = "dk",
-    secondary_fmt: str = "{:.0%}",
-) -> None:
-    """Draw one "table" panel inside `outer_spec`: rows = condition (`labels`),
-    columns = `columns` (e.g. party), each cell a single horizontal bar for
-    `value_fn(label, column) -> (value, error)`. Row 0 of the inner grid is the
-    panel title, row 1 the column (party) headers — both dedicated rows, rather
-    than relying on matplotlib's floating axes-title padding, which overlaps
-    neighboring rows once cells get short.
-
-    `secondary_fn`, if given, is a non-response rate — don't-know for yes/no
-    trait questions, not-recognized for thermometer targets — drawn as a small
-    muted label pinned to each cell's top-right corner (fixed axes-fraction
-    position, independent of the main bar's length) so it's always visible in
-    this same panel instead of needing a separate comparison chart.
-    """
-    n_datasets = len(labels)
-    n_cols = len(columns)
-    title_lines = title.count("\n") + 1
-    title_row_h = 0.7 * title_lines + 0.4
-    header_row_h = 0.6
-    inner = outer_spec.subgridspec(n_datasets + 2, n_cols, hspace=0.15, wspace=0.15,
-                                    height_ratios=[title_row_h, header_row_h] + [1] * n_datasets)
-
-    title_ax = fig.add_subplot(inner[0, :])
-    title_ax.axis("off")
-    title_ax.text(0.5, 0.05, title, ha="center", va="bottom", fontsize=10,
-                  fontweight="medium", transform=title_ax.transAxes)
-
-    for c_idx, column in enumerate(columns):
-        header_ax = fig.add_subplot(inner[1, c_idx])
-        header_ax.axis("off")
-        header_ax.text(0.5, 0.1, str(column), ha="center", va="bottom",
-                        fontsize=8.5, fontweight="medium", transform=header_ax.transAxes)
-
-    zero_x = 0 if xlim[0] <= 0 <= xlim[1] else xlim[0]
-    span = xlim[1] - xlim[0]
-
-    for d_idx, label in enumerate(labels):
-        color = condition_colors.get(label, "#888888")
-        for c_idx, column in enumerate(columns):
-            ax = fig.add_subplot(inner[d_idx + 2, c_idx])
-            v, e = value_fn(label, column)
-            if not (isinstance(v, float) and math.isnan(v)):
-                err = 0.0 if (e is None or (isinstance(e, float) and math.isnan(e))) else e
-                ax.barh(0, v, xerr=err or None, height=0.55, color=color, capsize=2,
-                        error_kw={"elinewidth": 0.7, "capthick": 0.7}, zorder=3)
-                # Label goes outside the bar/error-cap by default; but if that would
-                # overflow this axes' xlim, an outside label bleeds into the next
-                # column's (opaque) subplot and gets hidden behind it — so switch to
-                # placing it inside the bar instead whenever it's too close to the edge.
-                offset = span * 0.03
-                if v >= 0:
-                    if v + err > xlim[1] - span * 0.12:
-                        ax.text(v - offset, 0, value_fmt.format(v), va="center",
-                                ha="right", fontsize=6.5, color="white", clip_on=True, zorder=4)
-                    else:
-                        ax.text(v + err + offset, 0, value_fmt.format(v), va="center", ha="left",
-                                fontsize=6.5, color="#333333", clip_on=False)
-                else:
-                    if v - err < xlim[0] + span * 0.12:
-                        ax.text(v + offset, 0, value_fmt.format(v), va="center",
-                                ha="left", fontsize=6.5, color="white", clip_on=True, zorder=4)
-                    else:
-                        ax.text(v - err - offset, 0, value_fmt.format(v), va="center", ha="right",
-                                fontsize=6.5, color="#333333", clip_on=False)
-            else:
-                ax.text((xlim[0] + xlim[1]) / 2, 0, "N/A", va="center", ha="center",
-                        fontsize=6.5, color="#999999")
-            if secondary_fn is not None:
-                sv, se = secondary_fn(label, column)
-                sv_text = "N/A" if (sv is None or (isinstance(sv, float) and math.isnan(sv))) else secondary_fmt.format(sv)
-                ax.text(0.98, 0.92, f"{secondary_prefix} {sv_text}",
-                        transform=ax.transAxes, ha="right", va="top",
-                        fontsize=5.5, color="#999999", clip_on=False)
-            ax.set_xlim(*xlim)
-            ax.set_ylim(-0.7, 0.7)
-            ax.set_xticks([])
-            ax.set_yticks([])
-            for spine in ax.spines.values():
-                spine.set_visible(False)
-            ax.axvline(zero_x, color="#dddddd", linewidth=0.6, zorder=0)
-            if c_idx == 0:
-                ax.text(-0.08, 0.5, label, transform=ax.transAxes, ha="right",
-                        va="center", fontsize=7)
-
-
 MAX_GRID_COLS = 4
-
-# Row labels (condition names, drawn inside each panel by _draw_table_panel)
-# already identify color/condition, so no legend is needed.
 TOP_PAD = 0.96
-
-
-def plot_metric_comparison(
-    dfs: dict[str, pd.DataFrame],
-    keys: list[tuple[str, str]],
-    all_parties: list[str],
-    condition_colors: dict[str, str],
-    output_path: str,
-    metric: str,
-    value_col: str,
-    std_col: str,
-    ncols: int | None = None,
-    value_label: str = "Fraction answering Yes",
-    xlim: tuple[float, float] = (0, 1),
-    value_fmt: str = "{:.0%}",
-    show_dont_know: bool = False,
-) -> None:
-    """Table of horizontal bars, one panel per question/target: within each panel,
-    rows = condition, columns = party, cell = a single horizontal bar for that
-    condition/party's value.
-
-    Panels wrap onto multiple rows (ncols per row) so this scales from a
-    handful of questions up to a full trait battery without one absurdly wide row.
-
-    `show_dont_know`, when set (trait questions only), draws each cell's
-    don't-know rate as a small label inside this same panel (see
-    `_draw_table_panel`) instead of plotting it as a separate comparison chart.
-    """
-    n_panels = len(keys)
-    if n_panels == 0:
-        print(f"No columns to plot for {output_path} — skipping.")
-        return
-
-    labels     = list(dfs.keys())
-    n_datasets = len(labels)
-    n_parties  = len(all_parties)
-
-    ncols = min(ncols or n_panels, MAX_GRID_COLS)
-    nrows = -(-n_panels // ncols)  # ceil division
-
-    panel_w = 1.1 * n_parties + 1.0
-    panel_h = 0.4 * (n_datasets + 1) + 0.5
-    fig = plt.figure(figsize=(panel_w * ncols, panel_h * nrows))
-    outer = fig.add_gridspec(nrows, ncols, hspace=0.25, wspace=0.4,
-                              left=0.08, right=0.97, top=TOP_PAD, bottom=0.04)
-
-    for idx, (key, title) in enumerate(keys):
-        r, c = divmod(idx, ncols)
-
-        def value_fn(label, party, _key=key):
-            return _lookup(dfs[label], metric, _key, party, value_col, std_col)
-
-        secondary_fn = None
-        if show_dont_know:
-            def secondary_fn(label, party, _key=key):
-                return _lookup(dfs[label], metric, _key, party, "pct_dont_know_mean", "pct_dont_know_std")
-
-        _draw_table_panel(fig, outer[r, c], labels, all_parties, condition_colors,
-                           value_fn, xlim, title, value_fmt,
-                           secondary_fn=secondary_fn, secondary_prefix="dk")
-
-    fig.text(0.01, 0.5, value_label, va="center", rotation="vertical", fontsize=10, color="#555555")
-    fig.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
-    fig.savefig(output_path.replace('.pdf', '.png'), dpi=300, bbox_inches='tight', facecolor='white')
-    plt.close(fig)
-    print(f"Saved to {output_path}")
 
 
 def _declutter_positions(values: list[float], min_gap: float) -> list[float]:
@@ -600,6 +434,77 @@ def _declutter_positions(values: list[float], min_gap: float) -> list[float]:
     return positions
 
 
+def _draw_slope_panel(
+    ax,
+    labels: list[str],
+    key,
+    title: str,
+    all_parties: list[str],
+    party_colors: dict[str, str],
+    value_fn,
+    gt_fn,
+    ylim: tuple[float, float],
+    label_min_gap: float = 0.06,
+) -> None:
+    """Draw one slope-chart panel onto `ax` (see _plot_slope_core for the
+    value_fn/gt_fn contract) — split out so multi-row figures with a
+    different y-scale per row (see plot_gap_slope_rows) share the exact same
+    per-panel drawing. `label_min_gap` is the minimum spacing between
+    line-end party labels, as a fraction of the y-range — raise it for short
+    panels, where the default lets labels overlap."""
+    n_datasets = len(labels)
+    x_ticks = list(range(n_datasets))
+    right_margin = 1.6  # room for the party label drawn past the last point
+
+    party_vals = {}
+    for party in all_parties:
+        vals, errs = [], []
+        for label in labels:
+            v, e = value_fn(label, key, party)
+            vals.append(v)
+            errs.append(e)
+        party_vals[party] = (vals, errs)
+
+    # Party labels are drawn past the last point at that point's y-value —
+    # decluttered so two parties ending up close together (e.g. gap ~0)
+    # don't render as overlapping text (see _declutter_positions).
+    final_vals = [party_vals[p][0][-1] for p in all_parties]
+    label_ys = _declutter_positions(final_vals, (ylim[1] - ylim[0]) * label_min_gap)
+
+    for party, label_y in zip(all_parties, label_ys):
+        vals, errs = party_vals[party]
+        color = party_colors.get(party, "#888888")
+        ax.errorbar(x_ticks, vals, yerr=errs, marker="o", color=color,
+                    linewidth=1.5, markersize=4, solid_capstyle="round",
+                    clip_on=False, capsize=2, capthick=0.8, elinewidth=0.8)
+        if not pd.isna(vals[-1]):
+            ax.text(n_datasets - 1 + 0.12, label_y, party,
+                    ha="left", va="center", color=color)
+
+    any_gt = False
+    for party in all_parties:
+        gt_val, gt_err = gt_fn(key, party)
+        if pd.isna(gt_val):
+            continue
+        any_gt = True
+        color = party_colors.get(party, "#888888")
+        ax.axhline(gt_val, color=color, linestyle="--", linewidth=1.2, alpha=0.7, zorder=1)
+        if pd.notna(gt_err):
+            ax.axhspan(gt_val - gt_err, gt_val + gt_err, color=color, alpha=0.12, zorder=0)
+    if any_gt:
+        ax.text(-0.35, ylim[1] - (ylim[1] - ylim[0]) * 0.03, "Survey",
+                fontsize=8, style="italic", color="#666666", ha="left", va="top")
+
+    ax.set_title(title, fontweight="medium", pad=8, fontsize=10)
+    ax.set_xticks(x_ticks)
+    ax.set_xticklabels(labels, rotation=30, ha="right", rotation_mode="anchor")
+    ax.set_xlim(-0.4, n_datasets - 1 + right_margin)
+    ax.set_ylim(*ylim)
+    ax.yaxis.set_major_locator(plt.MaxNLocator(5))
+    ax.yaxis.grid(True, linestyle="-", alpha=0.15, color="#333333")
+    ax.set_axisbelow(True)
+
+
 def _plot_slope_core(
     labels: list[str],
     keys: list[tuple],
@@ -625,10 +530,6 @@ def _plot_slope_core(
         print(f"No columns to plot for {output_path} — skipping.")
         return
 
-    n_datasets = len(labels)
-    x_ticks = list(range(n_datasets))
-    right_margin = 1.6  # room for the party label drawn past the last point
-
     ncols = min(ncols or n_panels, MAX_GRID_COLS)
     nrows = -(-n_panels // ncols)
 
@@ -636,53 +537,7 @@ def _plot_slope_core(
     flat_axes = list(axes.flat)
 
     for ax, (key, title) in zip(flat_axes, keys):
-        party_vals = {}
-        for party in all_parties:
-            vals, errs = [], []
-            for label in labels:
-                v, e = value_fn(label, key, party)
-                vals.append(v)
-                errs.append(e)
-            party_vals[party] = (vals, errs)
-
-        # Party labels are drawn past the last point at that point's y-value —
-        # decluttered so two parties ending up close together (e.g. gap ~0)
-        # don't render as overlapping text (see _declutter_positions).
-        final_vals = [party_vals[p][0][-1] for p in all_parties]
-        label_ys = _declutter_positions(final_vals, (ylim[1] - ylim[0]) * 0.06)
-
-        for party, label_y in zip(all_parties, label_ys):
-            vals, errs = party_vals[party]
-            color = party_colors.get(party, "#888888")
-            ax.errorbar(x_ticks, vals, yerr=errs, marker="o", color=color,
-                        linewidth=1.5, markersize=4, solid_capstyle="round",
-                        clip_on=False, capsize=2, capthick=0.8, elinewidth=0.8)
-            if not pd.isna(vals[-1]):
-                ax.text(n_datasets - 1 + 0.12, label_y, party,
-                        ha="left", va="center", color=color)
-
-        any_gt = False
-        for party in all_parties:
-            gt_val, gt_err = gt_fn(key, party)
-            if pd.isna(gt_val):
-                continue
-            any_gt = True
-            color = party_colors.get(party, "#888888")
-            ax.axhline(gt_val, color=color, linestyle="--", linewidth=1.2, alpha=0.7, zorder=1)
-            if pd.notna(gt_err):
-                ax.axhspan(gt_val - gt_err, gt_val + gt_err, color=color, alpha=0.12, zorder=0)
-        if any_gt:
-            ax.text(-0.35, ylim[1] - (ylim[1] - ylim[0]) * 0.03, "Survey",
-                    fontsize=8, style="italic", color="#666666", ha="left", va="top")
-
-        ax.set_title(title, fontweight="medium", pad=8, fontsize=10)
-        ax.set_xticks(x_ticks)
-        ax.set_xticklabels(labels, rotation=30, ha="right", rotation_mode="anchor")
-        ax.set_xlim(-0.4, n_datasets - 1 + right_margin)
-        ax.set_ylim(*ylim)
-        ax.yaxis.set_major_locator(plt.MaxNLocator(5))
-        ax.yaxis.grid(True, linestyle="-", alpha=0.15, color="#333333")
-        ax.set_axisbelow(True)
+        _draw_slope_panel(ax, labels, key, title, all_parties, party_colors, value_fn, gt_fn, ylim)
 
     for ax in flat_axes[n_panels:]:
         ax.axis("off")
@@ -758,8 +613,9 @@ def _thermometer_gap(get_rating, role_map: dict[str, tuple[tuple[str, ...], tupl
     more than one (the "Combined" panel averages the party and candidate
     thermometers; a trait-differential panel averages a whole trait-polarity
     battery, see TRAIT_GAP_ROLE_MAPS). Errors on both sides are combined
-    assuming independence (same approximation as _affective_polarization_fn);
-    NaN if any role on either side is missing."""
+    assuming independence (a reasonable approximation, not exact, since both
+    sides come from the same respondents); NaN if any role on either side is
+    missing."""
     if party not in role_map:
         return float("nan"), float("nan")
     own_roles, opp_roles = role_map[party]
@@ -810,6 +666,64 @@ def plot_gap_slope_comparison(
                       value_fn, gt_fn, ncols, value_label, ylim)
 
 
+def plot_gap_slope_rows(
+    dfs: dict[str, pd.DataFrame],
+    rows: list[dict],
+    all_parties: list[str],
+    party_colors: dict[str, str],
+    output_path: str,
+    figsize: tuple[float, float] = (7.0, 5.2),
+) -> None:
+    """Multi-row gap slope chart: one row per `rows` entry, each row drawn
+    like plot_gap_slope_comparison but with its own y-scale/label, so gaps on
+    different scales (e.g. the 0-100 thermometer gap above the 0-1 trait gap)
+    can share one figure. Each row is a dict with keys `panels` (title ->
+    role_map, see GAP_ROLE_MAPS), `value_label`, `ylim`, `metric`,
+    `value_col`, `std_col`, and optionally `ground_truth` (see
+    plot_gap_slope_comparison). Panels share a y-axis within a row only;
+    the x-axis (conditions) is shared across rows, so only the bottom row
+    carries tick labels — keeps the figure short enough for a full-width
+    figure in a one-column paper."""
+    labels = list(dfs.keys())
+    nrows = len(rows)
+    ncols = max(len(row["panels"]) for row in rows)
+    if nrows == 0 or ncols == 0:
+        print(f"No panels to plot for {output_path} — skipping.")
+        return
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=figsize, sharey="row", squeeze=False)
+
+    for r, row in enumerate(rows):
+        panels, ground_truth = row["panels"], row.get("ground_truth")
+        metric, value_col, std_col = row["metric"], row["value_col"], row["std_col"]
+
+        def value_fn(label, title, party, panels=panels, metric=metric, value_col=value_col, std_col=std_col):
+            get_rating = lambda role, p: _lookup(dfs[label], metric, role, p, value_col, std_col)
+            return _thermometer_gap(get_rating, panels[title], party)
+
+        def gt_fn(title, party, panels=panels, ground_truth=ground_truth):
+            if not ground_truth:
+                return float("nan"), float("nan")
+            get_rating = lambda role, p: ground_truth.get(role, {}).get(p, (float("nan"), float("nan")))
+            return _thermometer_gap(get_rating, panels[title], party)
+
+        for c, title in enumerate(panels):
+            _draw_slope_panel(axes[r, c], labels, title, title, all_parties, party_colors,
+                              value_fn, gt_fn, row["ylim"], label_min_gap=0.12)
+        for c in range(len(panels), ncols):
+            axes[r, c].axis("off")
+        axes[r, 0].set_ylabel(row["value_label"])
+        if r < nrows - 1:
+            for ax in axes[r]:
+                ax.tick_params(labelbottom=False)
+
+    fig.tight_layout(pad=1.2)
+    fig.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
+    fig.savefig(output_path.replace('.pdf', '.png'), dpi=300, bbox_inches='tight', facecolor='white')
+    plt.close(fig)
+    print(f"Saved to {output_path}")
+
+
 def plot_role_average_comparison(
     dfs: dict[str, pd.DataFrame],
     panels: dict[str, tuple[str, ...]],
@@ -843,6 +757,280 @@ def plot_role_average_comparison(
                       value_fn, gt_fn, ncols, value_label, ylim)
 
 
+def _plot_grouped_bar_core(
+    labels: list[str],
+    keys: list[tuple],
+    all_parties: list[str],
+    party_colors: dict[str, str],
+    output_path: str,
+    value_fn,
+    gt_fn,
+    ncols: int | None,
+    value_label: str,
+    ylim: tuple[float, float],
+) -> None:
+    """Shared grouped-bar-chart drawing loop behind plot_metric_grouped_bar_comparison,
+    plot_gap_grouped_bar_comparison, and plot_role_average_grouped_bar_comparison — the
+    bar-chart analogue of _plot_slope_core, for conditions (e.g. obfuscation schemes)
+    that are distinct alternatives rather than a progressive/additive series, so
+    connecting them with a line would incorrectly imply an ordering. One cluster of
+    bars per condition (`labels`) sits on the x-axis of each panel; within a cluster,
+    one bar per party, colored by party (matching _plot_slope_core's per-party line
+    color) so a party can be compared across conditions by color and across parties
+    within one condition by position — the same two comparisons a slope chart offers,
+    without the false implication of a trend. `value_fn(label, key, party) -> (value,
+    error)` supplies each bar; `gt_fn(key, party) -> (value, error)` supplies a
+    constant real-world reference (skipped where NaN), drawn as a dashed party-colored
+    horizontal line with a shaded CI band exactly as in _plot_slope_core, since a
+    reference value doesn't depend on which condition is on the x-axis."""
+    n_panels = len(keys)
+    if n_panels == 0:
+        print(f"No columns to plot for {output_path} — skipping.")
+        return
+
+    n_datasets = len(labels)
+    n_parties  = len(all_parties)
+    x = list(range(n_datasets))
+    bar_width = min(0.8 / max(n_parties, 1), 0.32)
+    offsets = [-bar_width * (n_parties - 1) / 2 + i * bar_width for i in range(n_parties)]
+
+    ncols = min(ncols or n_panels, MAX_GRID_COLS)
+    nrows = -(-n_panels // ncols)
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=(3.6 * ncols, 4 * nrows), sharey=True, squeeze=False)
+    flat_axes = list(axes.flat)
+
+    for ax, (key, title) in zip(flat_axes, keys):
+        for party, offset in zip(all_parties, offsets):
+            color = party_colors.get(party, "#888888")
+            vals, errs = [], []
+            for label in labels:
+                v, e = value_fn(label, key, party)
+                vals.append(0.0 if pd.isna(v) else v)
+                errs.append(0.0 if pd.isna(e) else e)
+            positions = [xi + offset for xi in x]
+            ax.bar(positions, vals, width=bar_width * 0.92, yerr=errs, color=color,
+                   capsize=2, error_kw={"elinewidth": 0.7, "capthick": 0.7}, zorder=3, label=party)
+
+        any_gt = False
+        for party in all_parties:
+            gt_val, gt_err = gt_fn(key, party)
+            if pd.isna(gt_val):
+                continue
+            any_gt = True
+            color = party_colors.get(party, "#888888")
+            ax.axhline(gt_val, color=color, linestyle="--", linewidth=1.2, alpha=0.7, zorder=1)
+            if pd.notna(gt_err):
+                ax.axhspan(gt_val - gt_err, gt_val + gt_err, color=color, alpha=0.12, zorder=0)
+        if any_gt:
+            ax.text(-0.55, ylim[1] - (ylim[1] - ylim[0]) * 0.03, "Survey",
+                    fontsize=8, style="italic", color="#666666", ha="left", va="top")
+
+        if ylim[0] < 0 < ylim[1]:
+            ax.axhline(0, color="#333333", linewidth=0.8, zorder=2)
+
+        ax.set_title(title, fontweight="medium", pad=8, fontsize=10)
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, rotation=30, ha="right", rotation_mode="anchor")
+        ax.set_xlim(-0.6, n_datasets - 1 + 0.6)
+        ax.set_ylim(*ylim)
+        ax.yaxis.set_major_locator(plt.MaxNLocator(5))
+        ax.yaxis.grid(True, linestyle="-", alpha=0.15, color="#333333")
+        ax.set_axisbelow(True)
+
+    for ax in flat_axes[n_panels:]:
+        ax.axis("off")
+    for row in range(nrows):
+        axes[row, 0].set_ylabel(value_label)
+
+    legend_handles = [plt.Rectangle((0, 0), 1, 1, color=party_colors.get(p, "#888888")) for p in all_parties]
+    fig.legend(legend_handles, all_parties, loc="upper center", ncol=len(all_parties),
+               frameon=False, bbox_to_anchor=(0.5, 1.0), fontsize=10)
+
+    fig.tight_layout(pad=1.2, rect=(0, 0, 1, 0.94))
+    fig.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
+    fig.savefig(output_path.replace('.pdf', '.png'), dpi=300, bbox_inches='tight', facecolor='white')
+    plt.close(fig)
+    print(f"Saved to {output_path}")
+
+
+def plot_metric_grouped_bar_comparison(
+    dfs: dict[str, pd.DataFrame],
+    keys: list[tuple[str, str]],
+    all_parties: list[str],
+    party_colors: dict[str, str],
+    output_path: str,
+    metric: str,
+    value_col: str,
+    std_col: str,
+    ncols: int | None = None,
+    value_label: str = "Fraction answering Yes",
+    ylim: tuple[float, float] = (0, 1),
+    ground_truth: dict[str, dict[str, tuple[float, float]]] | None = None,
+) -> None:
+    """Grouped-bar chart: one cluster of bars per condition (colored by party),
+    one panel per question/target — the bar-chart analogue of
+    plot_slope_comparison (see _plot_grouped_bar_core), for conditions (e.g.
+    obfuscation schemes) that are distinct alternatives rather than a
+    progressive/additive series. `ground_truth`, as in plot_slope_comparison,
+    draws a constant party-colored reference line/band per key where available."""
+    def value_fn(label, key, party):
+        return _lookup(dfs[label], metric, key, party, value_col, std_col)
+
+    def gt_fn(key, party):
+        return (ground_truth or {}).get(key, {}).get(party, (float("nan"), float("nan")))
+
+    _plot_grouped_bar_core(list(dfs.keys()), keys, all_parties, party_colors, output_path,
+                            value_fn, gt_fn, ncols, value_label, ylim)
+
+
+def plot_gap_grouped_bar_comparison(
+    dfs: dict[str, pd.DataFrame],
+    panels: dict[str, dict[str, tuple[tuple[str, ...], tuple[str, ...]]]],
+    all_parties: list[str],
+    party_colors: dict[str, str],
+    output_path: str,
+    ncols: int | None = None,
+    value_label: str = "Thermometer gap",
+    ylim: tuple[float, float] = (-20, 100),
+    ground_truth: dict[str, dict[str, tuple[float, float]]] | None = None,
+    metric: str = "thermometer",
+    value_col: str = "rating_mean",
+    std_col: str = "rating_std",
+) -> None:
+    """Grouped-bar chart of an own-minus-opposing gap (see _thermometer_gap) —
+    the bar-chart analogue of plot_gap_slope_comparison, one panel per
+    `panels` entry (e.g. GAP_ROLE_MAPS' Party/Candidate/Combined, or
+    TRAIT_GAP_ROLE_MAPS)."""
+    def value_fn(label, title, party):
+        get_rating = lambda role, p: _lookup(dfs[label], metric, role, p, value_col, std_col)
+        return _thermometer_gap(get_rating, panels[title], party)
+
+    def gt_fn(title, party):
+        if not ground_truth:
+            return float("nan"), float("nan")
+        get_rating = lambda role, p: ground_truth.get(role, {}).get(p, (float("nan"), float("nan")))
+        return _thermometer_gap(get_rating, panels[title], party)
+
+    keys = [(title, title) for title in panels]
+    _plot_grouped_bar_core(list(dfs.keys()), keys, all_parties, party_colors, output_path,
+                            value_fn, gt_fn, ncols, value_label, ylim)
+
+
+def plot_role_average_grouped_bar_comparison(
+    dfs: dict[str, pd.DataFrame],
+    panels: dict[str, tuple[str, ...]],
+    all_parties: list[str],
+    party_colors: dict[str, str],
+    output_path: str,
+    ncols: int | None = None,
+    value_label: str = "Rate",
+    ylim: tuple[float, float] = (0, 1),
+    metric: str = "question",
+    value_col: str = "pct_dont_know_mean",
+    std_col: str = "pct_dont_know_std",
+) -> None:
+    """Grouped-bar chart of `value_col` averaged across a fixed question-key set
+    per panel (see _role_average) — the bar-chart analogue of
+    plot_role_average_comparison. Used to report a trait-differential panel's
+    don't-know rate on its own rather than netting it into the gap (see
+    TRAIT_DONT_KNOW_ROLES)."""
+    def value_fn(label, title, party):
+        get_rating = lambda role, p: _lookup(dfs[label], metric, role, p, value_col, std_col)
+        return _role_average(get_rating, panels[title], party)
+
+    def gt_fn(title, party):
+        return float("nan"), float("nan")
+
+    keys = [(title, title) for title in panels]
+    _plot_grouped_bar_core(list(dfs.keys()), keys, all_parties, party_colors, output_path,
+                            value_fn, gt_fn, ncols, value_label, ylim)
+
+
+def plot_trait_gap_heatmap(
+    dfs: dict[str, pd.DataFrame],
+    trait_questions: list[tuple[str, str]],
+    output_path: str,
+    parties: tuple[str, str] = ("Democrat", "Republican"),
+    metric: str = "question",
+    value_col: str = "pct_yes_mean",
+    std_col: str = "pct_yes_std",
+    cmap: str = "RdBu_r",
+    vlim: tuple[float, float] = (-1, 1),
+    value_fmt: str = "{:.2f}",
+    separator_after: int | None = None,
+) -> None:
+    """Heatmap of the per-trait own-minus-opposing gap (see _thermometer_gap):
+    rows = individual trait (in `trait_questions` order — pass
+    POSITIVE_TRAIT_QUESTIONS + NEGATIVE_TRAIT_QUESTIONS for the full battery,
+    with `separator_after=len(POSITIVE_TRAIT_QUESTIONS) - 1` to draw a divider
+    between them), columns = condition, one panel per party in `parties`.
+
+    This is the compact table-style alternative to plotting every individual
+    trait as its own bar/slope panel (plot_gap_grouped_bar_comparison /
+    plot_gap_slope_comparison only plot the trait battery *aggregated* into one
+    "Positive traits"/"Negative traits" gap via TRAIT_GAP_ROLE_MAPS — this
+    function is for when you want each trait broken out on its own row instead,
+    which doesn't scale as a grid of small panels once there are more than a
+    handful of traits). Cell color and printed value are both the gap itself
+    (diverging colormap centered at 0, `vlim` sets the color range) — this reads
+    like a colored table rather than a chart with axes, so unlike the bar/slope
+    charts it does not show each cell's uncertainty (CI); use
+    print_gap_comparison_table alongside it for exact mean ± CI figures."""
+    labels = list(dfs.keys())
+    trait_labels = [t for _, t in trait_questions]
+    role_maps = [trait_gap_role_map([(key, trait)]) for key, trait in trait_questions]
+
+    fig, axes = plt.subplots(1, len(parties),
+                              figsize=(1.1 * len(labels) + 1.8, 0.5 * len(trait_questions) + 1.4),
+                              squeeze=False)
+    axes = axes[0]
+
+    im = None
+    for idx, (ax, party) in enumerate(zip(axes, parties)):
+        matrix = np.full((len(trait_questions), len(labels)), np.nan)
+        for r, role_map in enumerate(role_maps):
+            for c, label in enumerate(labels):
+                def get_rating(role, p, _label=label):
+                    return _lookup(dfs[_label], metric, role, p, value_col, std_col)
+                v, _ = _thermometer_gap(get_rating, role_map, party)
+                matrix[r, c] = v
+
+        im = ax.imshow(matrix, cmap=cmap, vmin=vlim[0], vmax=vlim[1], aspect="auto")
+        for r in range(matrix.shape[0]):
+            for c in range(matrix.shape[1]):
+                v = matrix[r, c]
+                if math.isnan(v):
+                    text, color = "N/A", "#999999"
+                else:
+                    text = value_fmt.format(v)
+                    color = "white" if abs(v) > (vlim[1] - vlim[0]) * 0.3 else "#333333"
+                ax.text(c, r, text, ha="center", va="center", fontsize=9, color=color)
+
+        ax.set_xticks(range(len(labels)))
+        ax.set_xticklabels(labels, rotation=30, ha="right", rotation_mode="anchor")
+        ax.set_yticks(range(len(trait_labels)))
+        # Trait labels are the same across panels — only the leftmost panel
+        # needs them, so later panels don't crowd/overlap their left neighbor.
+        ax.set_yticklabels(trait_labels if idx == 0 else [])
+        ax.set_title(party, fontweight="medium", pad=8, fontsize=11)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        ax.set_xticks(np.arange(-0.5, len(labels), 1), minor=True)
+        ax.set_yticks(np.arange(-0.5, len(trait_labels), 1), minor=True)
+        ax.grid(which="minor", color="white", linewidth=1.5)
+        ax.tick_params(which="minor", bottom=False, left=False)
+        if separator_after is not None:
+            ax.axhline(separator_after + 0.5, color="#333333", linewidth=1.5)
+
+    fig.subplots_adjust(wspace=0.15)
+    fig.colorbar(im, ax=list(axes), shrink=0.8, label="Trait gap (own - opposing)")
+    fig.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
+    fig.savefig(output_path.replace('.pdf', '.png'), dpi=300, bbox_inches='tight', facecolor='white')
+    plt.close(fig)
+    print(f"Saved to {output_path}")
+
+
 def print_thermometer_table(
     dfs: dict[str, pd.DataFrame],
     roles: list[tuple[str, str]],
@@ -850,14 +1038,11 @@ def print_thermometer_table(
 ) -> None:
     """Print the LLM-answered feeling-thermometer rating (rows = condition,
     columns = party) for each target in `roles` (as (role, row_label) pairs)
-    — the actual per-condition values drawn as points in
-    plot_slope_comparison's thermometer chart (mirrors the printed table
-    plot_thermometer_comparison already draws for the obfuscation-style
-    combined chart, exposed standalone for callers like the ablation script
-    that build the thermometer chart via plot_slope_comparison directly).
-    Each cell is annotated with its not-recognized rate (the target wasn't a
-    well-known enough figure/party label for the respondent to rate), same
-    convention as plot_thermometer_comparison."""
+    — the actual per-condition values drawn as points/bars in the
+    thermometer comparison chart (plot_slope_comparison or
+    plot_metric_grouped_bar_comparison). Each cell is annotated with its
+    not-recognized rate (the target wasn't a well-known enough figure/party
+    label for the respondent to rate)."""
     def value_fn(role):
         return lambda label, party: _lookup(dfs[label], "thermometer", role, party, "rating_mean", "rating_std")
 
@@ -958,132 +1143,3 @@ def print_gap_comparison_table(
                              secondary_fn=secondary_fn, secondary_prefix="dk", secondary_fmt="{:.1%}")
 
 
-def _affective_polarization_fn(dfs: dict[str, pd.DataFrame], role_map: dict[str, tuple[str, str]]):
-    """Return a `value_fn(label, party) -> (value, error)` computing own-role
-    rating minus opposing-role rating for `party`, per `role_map` (see
-    PARTY_THERM_ROLES / LEADER_THERM_ROLES)."""
-    def value_fn(label, party):
-        if party not in role_map:
-            return float("nan"), float("nan")
-        own_role, opp_role = role_map[party]
-        own_val, own_err = _lookup(dfs[label], "thermometer", own_role, party, "rating_mean", "rating_std")
-        opp_val, opp_err = _lookup(dfs[label], "thermometer", opp_role, party, "rating_mean", "rating_std")
-        if math.isnan(own_val) or math.isnan(opp_val):
-            return float("nan"), float("nan")
-        # Own/opposing ratings come from the same respondents, but per-run values
-        # aren't available in this aggregated format, so their errors are combined
-        # assuming independence (a reasonable approximation, not exact).
-        own_err = own_err if not math.isnan(own_err) else 0.0
-        opp_err = opp_err if not math.isnan(opp_err) else 0.0
-        return own_val - opp_val, math.hypot(own_err, opp_err)
-    return value_fn
-
-
-def plot_thermometer_comparison(
-    dfs: dict[str, pd.DataFrame], all_parties: list[str], condition_colors: dict[str, str], output_path: str,
-    therm_title_suffix: str = "",
-) -> None:
-    """Fixed 3-row x 2-column grid: row 0 is the Democratic party and its
-    leader (Biden), row 1 the Republican party and its leader (Trump), row 2
-    the affective-polarization summaries (party-based, then leader-based) —
-    every feeling-thermometer result in one chart, rather than a separate
-    affective-polarization figure. `therm_title_suffix` (e.g. "\\n(obfuscated
-    per condition)") is appended to the "Feeling thermometer: X" panel titles
-    only — callers where nothing is obfuscated (ablation comparisons) can
-    leave it blank."""
-    def therm_present(role: str) -> bool:
-        return all(((df["metric"] == "thermometer") & (df["key"] == role)).any() for df in dfs.values())
-
-    labels     = list(dfs.keys())
-    n_datasets = len(labels)
-    n_parties  = len(all_parties)
-
-    party_polar_parties  = [p for p in PARTY_THERM_ROLES
-                             if any((df["party"] == p).any() for df in dfs.values())]
-    leader_polar_parties = [p for p in LEADER_THERM_ROLES
-                             if any((df["party"] == p).any() for df in dfs.values())]
-    party_polar_fn  = _affective_polarization_fn(dfs, PARTY_THERM_ROLES)
-    leader_polar_fn = _affective_polarization_fn(dfs, LEADER_THERM_ROLES)
-
-    def therm_value_fn(role):
-        return lambda label, party: _lookup(dfs[label], "thermometer", role, party, "rating_mean", "rating_std")
-
-    def therm_not_recognized_fn(role):
-        def fn(label, party):
-            rec, err = _lookup(dfs[label], "thermometer", role, party, "pct_recognized_mean", "pct_recognized_std")
-            if pd.isna(rec):
-                return float("nan"), float("nan")
-            return 1.0 - rec, err
-        return fn
-
-    # (panel kind, role, title) per grid cell; "role" is a thermometer key for
-    # "therm" panels and unused (None) for the polarization panels.
-    grid = [
-        [("therm", "democrats", "Democrats"), ("therm", "biden", "Biden")],
-        [("therm", "republicans", "Republicans"), ("therm", "trump", "Trump")],
-        [("polar_party", None, "Affective polarization\n(party)"),
-         ("polar_leader", None, "Affective polarization\n(leader)")],
-    ]
-    nrows, ncols = 3, 2
-
-    panel_w = 1.1 * n_parties + 1.0
-    panel_h = 0.4 * (n_datasets + 1) + 0.9
-    fig = plt.figure(figsize=(panel_w * ncols, panel_h * nrows))
-    outer = fig.add_gridspec(nrows, ncols, hspace=0.25, wspace=0.4, left=0.08, right=0.97,
-                              top=TOP_PAD, bottom=0.04)
-
-    any_drawn = False
-    for r, row in enumerate(grid):
-        for c, (kind, role, title) in enumerate(row):
-            spec = outer[r, c]
-            if kind == "therm":
-                if not therm_present(role):
-                    continue
-                any_drawn = True
-                _draw_table_panel(fig, spec, labels, all_parties, condition_colors, therm_value_fn(role),
-                                   (0, 100), f"Feeling thermometer: {title}{therm_title_suffix}", "{:.0f}",
-                                   secondary_fn=therm_not_recognized_fn(role), secondary_prefix="nr")
-            elif kind == "polar_party":
-                if not party_polar_parties:
-                    continue
-                any_drawn = True
-                _draw_table_panel(fig, spec, labels, party_polar_parties, condition_colors, party_polar_fn,
-                                   (-100, 100), f"{title}\n(own-party rating minus opposing-party rating)", "{:.0f}")
-            elif kind == "polar_leader":
-                if not leader_polar_parties:
-                    continue
-                any_drawn = True
-                _draw_table_panel(fig, spec, labels, leader_polar_parties, condition_colors, leader_polar_fn,
-                                   (-100, 100), f"{title}\n(own party's leader minus other leader rating)", "{:.0f}")
-
-    if not any_drawn:
-        plt.close(fig)
-        print("No feeling-thermometer rows found in the comparison CSVs — skipping thermometer comparison plot.")
-        return
-
-    fig.text(0.01, 0.5, "Rating (0-100) / Polarization (-100 to 100)",
-              va="center", rotation="vertical", fontsize=10, color="#555555")
-    fig.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
-    fig.savefig(output_path.replace('.pdf', '.png'), dpi=300, bbox_inches='tight', facecolor='white')
-    plt.close(fig)
-    print(f"Saved to {output_path}")
-
-    print(f"\n{'='*60}")
-    print("  Feeling thermometer (rows = condition, columns = party)")
-    print(f"{'='*60}")
-    for role, person_label in [("democrats", "Democrats"), ("biden", "Biden"),
-                                ("republicans", "Republicans"), ("trump", "Trump")]:
-        if not therm_present(role):
-            continue
-        _print_comparison_table(f"Feeling thermometer: {person_label}", labels, all_parties, therm_value_fn(role),
-                                 secondary_fn=therm_not_recognized_fn(role), secondary_prefix="nr")
-
-    if party_polar_parties:
-        print(f"\n{'='*60}")
-        print("  Affective polarization (rows = condition, columns = party)")
-        print(f"{'='*60}")
-        _print_comparison_table("Affective polarization (party): own-party minus opposing-party rating",
-                                 labels, party_polar_parties, party_polar_fn)
-    if leader_polar_parties:
-        _print_comparison_table("Affective polarization (leader): own party's leader minus other leader rating",
-                                 labels, leader_polar_parties, leader_polar_fn)

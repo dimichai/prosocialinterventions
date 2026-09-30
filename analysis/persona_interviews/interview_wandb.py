@@ -165,6 +165,16 @@ def download_results_dataframe(run, cache_dir: str = CACHE_DIR) -> pd.DataFrame:
     return pd.read_csv(csv_path)
 
 
-def fetch_runs_by_group(project: str, group: str):
-    """Fetch all runs in `project` sharing the given wandb group (batch) id."""
-    return list(wandb.Api().runs(project, filters={"group": group}))
+def fetch_runs_by_group(project: str, group: str, only_finished: bool = True):
+    """Fetch all runs in `project` sharing the given wandb group (batch) id —
+    by default only runs that finished, since running/crashed/failed runs
+    have no (or partial) logged results."""
+    runs = list(wandb.Api().runs(project, filters={"group": group}))
+    if not only_finished:
+        return runs
+    finished = [r for r in runs if r.state == "finished"]
+    skipped = [r for r in runs if r.state != "finished"]
+    if skipped:
+        print(f"Skipping {len(skipped)} unfinished run(s) in group '{group}': "
+              + ", ".join(f"{r.id} ({r.state})" for r in skipped))
+    return finished

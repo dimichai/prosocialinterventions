@@ -243,15 +243,21 @@ def plot_networks(labels: list[str], platforms: dict, output_path: str) -> None:
         G = nx.DiGraph()
         G.add_nodes_from(user.identifier for user in platform.users)
         G.add_edges_from(platform.user_links)
+        # Isolates (users who never followed/were followed) carry no structure and
+        # just pile up in the middle of the layout.
+        G.remove_nodes_from(list(nx.isolates(G)))
 
-        node_colors = [
-            party_colors.get(user.persona.get('party', ''), '#999999')
-            for user in sorted(platform.users, key=lambda u: u.identifier)
-        ]
+        party_by_id = {user.identifier: user.persona.get('party', '') for user in platform.users}
+        node_colors = [party_colors.get(party_by_id[n], '#999999') for n in G]
+
+        # Lay out on the undirected graph: Kamada-Kawai on the DiGraph uses directed
+        # shortest paths, so most pairs are "unreachable" and the layout loses the
+        # party communities (an EI of -0.8 network rendered as fully mixed).
+        pos = nx.kamada_kawai_layout(G.to_undirected())
 
         ax = axes[idx]
-        nx.draw_kamada_kawai(G, ax=ax, node_color=node_colors, edgecolors='black',
-                              node_size=100, width=1.0, linewidths=0.5)
+        nx.draw(G, pos, ax=ax, node_color=node_colors, edgecolors='black',
+                node_size=100, width=1.0, linewidths=0.5)
         panel_letter = chr(ord('A') + idx)
         ax.set_title(f"({panel_letter}) {label}", pad=10)
 
@@ -263,14 +269,15 @@ def plot_networks(labels: list[str], platforms: dict, output_path: str) -> None:
 
 
 def plot_cross_party_follows(labels: list[str], platforms: dict, output_path: str) -> None:
-    """Fraction of follows going to each party, one panel per follower party,
-    one line per followed party across ablation conditions — same slope-chart
-    style as interview_comparison_plots.plot_slope_comparison (party-colored
-    lines, error bars, party label at the line's end), just computed directly
-    from each condition's platform.user_links rather than aggregated interview
-    answers."""
-    parties = ['Democrat', 'Republican', 'Non-partisan']
-    party_colors = party_color_map(parties)
+    """Cross-party follow breakdown across ablation conditions, same 3-panel
+    layout as dimi_analysis.py's original cross_party_follows figure:
+    (1) fraction of each partisan's follows going to the opposing party,
+    (2)/(3) Democrat / Republican follows split by followed party — with the
+    empirical reference lines (Gopal et al., 2025; Halberstam et al., 2016).
+    Computed directly from each condition's platform.user_links."""
+    panel_parties = ['Democrat', 'Republican']
+    opposing = {'Democrat': 'Republican', 'Republican': 'Democrat'}
+    party_colors = party_color_map(panel_parties)
 
     rows = []
     for label in labels:
@@ -282,44 +289,76 @@ def plot_cross_party_follows(labels: list[str], platforms: dict, output_path: st
                 'follower_party': party_by_id.get(from_id, 'Unknown'),
                 'followed_party': party_by_id.get(to_id, 'Unknown'),
             })
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(rows, columns=['label', 'follower_party', 'followed_party'])
 
     x_ticks = list(range(len(labels)))
-    fig, axes = plt.subplots(1, len(parties), figsize=(3.3 * len(parties), 4), sharey=True)
+    last_x = len(labels) - 1
 
-    for panel_idx, follower_party in enumerate(parties):
-        ax = axes[panel_idx]
-        for followed_party in parties:
+    def follow_frac(label, follower_party, followed_party):
+        subset = df[(df['label'] == label) & (df['follower_party'] == follower_party)]
+        if subset.empty:
+            return None
+        return (subset['followed_party'] == followed_party).mean(), len(subset)
+
+    def slope_panel(ax, panel_idx, title, compute_fn):
+        """One line per party in panel_parties; compute_fn(label, party) -> (p, n) or None."""
+        for party in panel_parties:
             vals, errs = [], []
             for label in labels:
-                subset = df[(df['label'] == label) & (df['follower_party'] == follower_party)]
-                n = len(subset)
-                if n == 0:
+                result = compute_fn(label, party)
+                if result is None:
                     vals.append(float('nan'))
                     errs.append(float('nan'))
                     continue
-                p = (subset['followed_party'] == followed_party).mean()
+                p, n = result
                 vals.append(p)
                 errs.append(1.96 * (p * (1 - p) / n) ** 0.5)
 
-            color = party_colors.get(followed_party, '#888888')
+            color = party_colors[party]
             ax.errorbar(x_ticks, vals, yerr=errs, marker='o', color=color,
-                        linewidth=1.5, markersize=4, solid_capstyle='round',
-                        clip_on=False, capsize=2, capthick=0.8, elinewidth=0.8)
+                        linewidth=1.5, markersize=5, solid_capstyle='round',
+                        clip_on=False, capsize=3, capthick=1.0, elinewidth=1.0)
             if not pd.isna(vals[-1]):
-                ax.text(len(labels) - 1 + 0.12, vals[-1], followed_party,
-                        ha='left', va='center', color=color)
+                ax.text(last_x + 0.12, vals[-1], party, va='center', color=color, clip_on=False)
 
-        ax.set_title(f"{follower_party} follows", pad=8)
         ax.set_xticks(x_ticks)
         ax.set_xticklabels(labels, rotation=30, ha='right', rotation_mode='anchor')
-        ax.set_xlim(-0.4, len(labels) - 1 + 1.6)
+        ax.set_title(title, pad=8)
+        ax.set_ylabel('Fraction of follows' if panel_idx == 0 else '')
         ax.set_ylim(-0.02, 1.02)
         ax.yaxis.grid(True)
-        if panel_idx == 0:
-            ax.set_ylabel('Fraction of follows')
+        ax.set_xlim(-0.3, last_x + 1.5)
 
-    fig.tight_layout(pad=1.2)
+    fig, axes = plt.subplots(1, 3, figsize=(10, 4), sharey=True)
+
+    # Panel 1: fraction of each partisan's follows going to the opposing party
+    slope_panel(axes[0], 0, 'Cross-party follows',
+                lambda label, party: follow_frac(label, party, opposing[party]))
+    axes[0].axhline(y=0.215, color='#999999', linestyle='--', linewidth=1.0)
+    axes[0].text(last_x - 0.7, 0.13, '(Gopal et al., 2025)',
+                 va='bottom', color='#999999', fontsize=9, fontstyle='italic', clip_on=False)
+
+    # Panels 2–3: Democrat / Republican follows, split by followed party
+    for panel_idx, follower_party in enumerate(panel_parties, start=1):
+        slope_panel(axes[panel_idx], panel_idx, f'{follower_party} follows:',
+                    lambda label, party, fp=follower_party: follow_frac(label, fp, party))
+
+    dem_color, rep_color = party_colors['Democrat'], party_colors['Republican']
+    axes[1].axhline(y=0.6711, color=dem_color, linestyle='--', linewidth=1.0, alpha=0.5)
+    axes[1].axhline(y=0.3289, color=rep_color, linestyle='--', linewidth=1.0, alpha=0.5)
+    axes[1].text(-0.2, 0.6711, '(Halberstam et al., 2016)',
+                 va='bottom', color=dem_color, fontsize=8, fontstyle='italic', clip_on=False)
+    axes[1].text(last_x - 0.7, 0.35, '(Halberstam et al., 2016)',
+                 va='bottom', color=rep_color, fontsize=8, fontstyle='italic', clip_on=False)
+
+    axes[2].axhline(y=0.2025, color=dem_color, linestyle='--', linewidth=1.0, alpha=0.5)
+    axes[2].axhline(y=0.7975, color=rep_color, linestyle='--', linewidth=1.0, alpha=0.5)
+    axes[2].text(last_x - 1.0, 0.2025, '(Halberstam et al., 2016)',
+                 va='bottom', color=dem_color, fontsize=8, fontstyle='italic', clip_on=False)
+    axes[2].text(last_x - 1.0, 0.7975, '(Halberstam et al., 2016)',
+                 va='bottom', color=rep_color, fontsize=8, fontstyle='italic', clip_on=False)
+
+    fig.tight_layout()
     fig.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
     fig.savefig(output_path.replace('.pdf', '.png'), dpi=300, bbox_inches='tight', facecolor='white')
     plt.close(fig)

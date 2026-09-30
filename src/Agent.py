@@ -8,6 +8,20 @@ from openai.types.chat import ParsedChoice
 
 import prompts as P
 
+# Reasoning is turned off for models that reason by default so they stay
+# comparable to non-reasoning models. DeepSeek doesn't accept effort "none"
+# and needs `enabled: false`; GPT-6-family models accept effort "none".
+NO_REASONING_MODEL_PREFIXES = ("deepseek",)
+NONE_EFFORT_MODEL_PREFIXES = ("gpt-6", "openai/gpt-6")
+
+
+def _extra_body_for_model(model: str) -> dict:
+    if model.lower().startswith(NO_REASONING_MODEL_PREFIXES):
+        return {"reasoning": {"enabled": False}}
+    if model.lower().startswith(NONE_EFFORT_MODEL_PREFIXES):
+        return {"reasoning": {"effort": "none"}}
+    return {}
+
 class Action(BaseModel):
     option: int
     content: str
@@ -72,7 +86,8 @@ class Agent():
             model=self.model,
             messages=[
                 {"role": "system", "content": prompt},
-            ]
+            ],
+            extra_body=_extra_body_for_model(self.model),
         )
 
         self.persona['biography'] = response.choices[0].message.content
@@ -130,8 +145,8 @@ class Agent():
                 {"role": "system", "content": self._generate_sys_msg()},
                 {"role": "user", "content": message}
             ],
-            response_format=response_format
-
+            response_format=response_format,
+            extra_body=_extra_body_for_model(self.model),
         )
 
         # Keep track of the tokens used for cost analysis

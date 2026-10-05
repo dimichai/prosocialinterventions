@@ -99,10 +99,11 @@ def compute_metrics(platform, step, cost_input, cost_output, cost_cached, comput
 
         democrats = {u.identifier for u in platform.users if u.persona['party'] == 'Democrat'}
         republicans = {u.identifier for u in platform.users if u.persona['party'] == 'Republican'}
-        others = set(G.nodes()) - democrats - republicans
-        communities = [c for c in (democrats, republicans, others) if c]
-        if len(communities) > 1:
-            metrics["modularity_dem_rep"] = nx.community.modularity(G, communities)
+        # Restricted to Democrat/Republican nodes only (same as EI_index_dem_rep),
+        # so non-partisans and their links don't enter the partition.
+        G_dem_rep = G.subgraph(democrats | republicans)
+        if democrats and republicans and G_dem_rep.number_of_edges() > 0:
+            metrics["modularity_dem_rep"] = nx.community.modularity(G_dem_rep, [democrats, republicans])
 
         # Clustering coefficient is expensive, so it's only computed periodically
         if compute_clustering:

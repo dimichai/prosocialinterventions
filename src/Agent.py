@@ -14,7 +14,7 @@ import prompts as P
 # Gemini 3.x can't switch thinking off entirely, "minimal" is its lowest level.
 # Gemini 2.5 Flash Lite has thinking off by default and needs nothing.
 NO_REASONING_MODEL_PREFIXES = ("deepseek",)
-NONE_EFFORT_MODEL_PREFIXES = ("gpt-6", "openai/gpt-6")
+NONE_EFFORT_MODEL_PREFIXES = ("gpt-6", "openai/gpt-6", "mistralai/mistral-small-2603")
 MINIMAL_EFFORT_MODEL_PREFIXES = ("google/gemini-3",)
 
 

@@ -47,7 +47,7 @@ NO_REASONING_MODEL_PREFIXES = ("deepseek",)
 
 # GPT-6-family models (e.g. openai/gpt-6-luna) do support effort "none", so
 # reasoning is switched off that way to keep them comparable in the ablation.
-NONE_EFFORT_MODEL_PREFIXES = ("gpt-6", "openai/gpt-6")
+NONE_EFFORT_MODEL_PREFIXES = ("gpt-6", "openai/gpt-6", "mistralai/mistral-small-2603")
 
 # Gemini 3.x can't switch thinking off entirely; "minimal" is its lowest level.
 MINIMAL_EFFORT_MODEL_PREFIXES = ("google/gemini-3",)

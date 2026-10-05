@@ -175,6 +175,31 @@ def download_platform(run, cache_dir: Path = PLATFORM_CACHE_DIR):
         return pickle.load(f)
 
 
+def modularity_dem_rep(platform) -> float | None:
+    """Modularity of the Democrat/Republican partition on the follow network
+    restricted to Democrat/Republican nodes — same computation as compute_metrics
+    in src/main.py. None if undefined (a party is empty, or no links between
+    Democrat/Republican nodes)."""
+    G = nx.DiGraph()
+    G.add_nodes_from(u.identifier for u in platform.users)
+    G.add_edges_from(platform.user_links)
+    democrats = {u.identifier for u in platform.users if u.persona['party'] == 'Democrat'}
+    republicans = {u.identifier for u in platform.users if u.persona['party'] == 'Republican'}
+    G_dem_rep = G.subgraph(democrats | republicans)
+    if not democrats or not republicans or G_dem_rep.number_of_edges() == 0:
+        return None
+    return nx.community.modularity(G_dem_rep, [democrats, republicans])
+
+
+# Metrics recomputed from each run's final platform artifact instead of read from
+# its logged wandb value. modularity_dem_rep: runs logged before compute_metrics
+# was restricted to Democrat/Republican nodes treated non-partisans as a third
+# community, so the logged value isn't comparable across old and new runs.
+RECOMPUTED_METRICS = {
+    'modularity_dem_rep': modularity_dem_rep,
+}
+
+
 def plot_networks(labels: list[str], platforms: dict, output_path: str) -> None:
     """One network diagram per condition, nodes colored by party."""
     n = len(labels)
@@ -216,7 +241,8 @@ def fetch_and_aggregate(
     runs_by_condition: dict[str, list], metrics: dict[str, str] = METRICS
 ) -> tuple[dict[str, dict[str, float]], dict[str, dict[str, list[float]]]]:
     """Given condition label -> list of wandb runs (one per seed) sharing that
-    condition, eagerly load each run and pull each metric's final value. Returns
+    condition, eagerly load each run and pull each metric's final value (metrics in
+    RECOMPUTED_METRICS are recomputed from the run's platform artifact instead). Returns
     (data, raw_data): `data[label][metric]` is the cross-seed mean and
     `data[label][f'{metric}_se']` its standard error; `raw_data[label][metric]` is
     the list of per-seed raw values (used for the Mann-Whitney significance test in
@@ -230,8 +256,12 @@ def fetch_and_aggregate(
     for label, runs in runs_by_condition.items():
         for run in runs:
             load_run(run)
+            platform = download_platform(run) if any(m in RECOMPUTED_METRICS for m in metrics) else None
             for metric in metrics:
-                val = get_metric_from_run(run, metric)
+                if metric in RECOMPUTED_METRICS:
+                    val = RECOMPUTED_METRICS[metric](platform)
+                else:
+                    val = get_metric_from_run(run, metric)
                 # NaN is a legitimate "undefined for this run" value (e.g. correlation
                 # on a zero-variance series) — excluded here so it's absent from both
                 # the nan-mean/SE below and the Mann-Whitney test in

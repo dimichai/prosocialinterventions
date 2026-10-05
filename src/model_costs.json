@@ -53,5 +53,15 @@
         "input": 0.25,
         "output": 1.50,
         "cached_input": 0.025
+    },
+    "meta-llama/llama-4-maverick": {
+        "input": 0.1875,
+        "output": 0.6525,
+        "cached_input": null
+    },
+    "deepseek/deepseek-v4.1-flash": {
+        "input": 0.30,
+        "output": 1.20,
+        "cached_input": 0.006
     }
 }

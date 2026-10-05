@@ -11,8 +11,11 @@ import prompts as P
 # Reasoning is turned off for models that reason by default so they stay
 # comparable to non-reasoning models. DeepSeek doesn't accept effort "none"
 # and needs `enabled: false`; GPT-6-family models accept effort "none".
+# Gemini 3.x can't switch thinking off entirely, "minimal" is its lowest level.
+# Gemini 2.5 Flash Lite has thinking off by default and needs nothing.
 NO_REASONING_MODEL_PREFIXES = ("deepseek",)
 NONE_EFFORT_MODEL_PREFIXES = ("gpt-6", "openai/gpt-6")
+MINIMAL_EFFORT_MODEL_PREFIXES = ("google/gemini-3",)
 
 
 def _extra_body_for_model(model: str) -> dict:
@@ -20,6 +23,8 @@ def _extra_body_for_model(model: str) -> dict:
         return {"reasoning": {"enabled": False}}
     if model.lower().startswith(NONE_EFFORT_MODEL_PREFIXES):
         return {"reasoning": {"effort": "none"}}
+    if model.lower().startswith(MINIMAL_EFFORT_MODEL_PREFIXES):
+        return {"reasoning": {"effort": "minimal"}}
     return {}
 
 class Action(BaseModel):

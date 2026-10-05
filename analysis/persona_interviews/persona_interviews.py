@@ -49,6 +49,9 @@ NO_REASONING_MODEL_PREFIXES = ("deepseek",)
 # reasoning is switched off that way to keep them comparable in the ablation.
 NONE_EFFORT_MODEL_PREFIXES = ("gpt-6", "openai/gpt-6")
 
+# Gemini 3.x can't switch thinking off entirely; "minimal" is its lowest level.
+MINIMAL_EFFORT_MODEL_PREFIXES = ("google/gemini-3",)
+
 
 def _max_tokens_for_model(model: str) -> int:
     if model.lower().startswith(REASONING_MODEL_PREFIXES):
@@ -61,6 +64,8 @@ def _extra_body_for_model(model: str) -> dict:
         return {"reasoning": {"enabled": False}}
     if model.lower().startswith(NONE_EFFORT_MODEL_PREFIXES):
         return {"reasoning": {"effort": "none"}}
+    if model.lower().startswith(MINIMAL_EFFORT_MODEL_PREFIXES):
+        return {"reasoning": {"effort": "minimal"}}
     return {}
 
 

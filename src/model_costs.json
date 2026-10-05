@@ -48,5 +48,10 @@
         "input": 0.10,
         "output": 0.50,
         "cached_input": 0.01
+    },
+    "google/gemini-3.1-flash-lite": {
+        "input": 0.25,
+        "output": 1.50,
+        "cached_input": 0.025
     }
 }

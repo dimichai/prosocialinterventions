@@ -52,6 +52,10 @@ NONE_EFFORT_MODEL_PREFIXES = ("gpt-6", "openai/gpt-6", "mistralai/mistral-small-
 # Gemini 3.x can't switch thinking off entirely; "minimal" is its lowest level.
 MINIMAL_EFFORT_MODEL_PREFIXES = ("google/gemini-3",)
 
+# The SDK default of 2 retries is not enough to ride out upstream 429s on
+# OpenRouter's shared provider pool. Retries back off exponentially (max 8s).
+LLM_MAX_RETRIES = 10
+
 
 def _max_tokens_for_model(model: str) -> int:
     if model.lower().startswith(REASONING_MODEL_PREFIXES):
@@ -248,6 +252,7 @@ def interview_personas(
     dotenv.load_dotenv(os.path.join(os.path.dirname(__file__), "../../.env"))
 
     client = OpenAI(
+        max_retries=LLM_MAX_RETRIES,
         base_url="https://openrouter.ai/api/v1",
         api_key=os.getenv(f"OPENROUTER_API_KEY_{openrouter_api_key or 1}"),
     )

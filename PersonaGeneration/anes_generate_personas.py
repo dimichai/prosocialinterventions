@@ -16,6 +16,24 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # each, so 200 retries keeps a call waiting for roughly 25 minutes.
 LLM_MAX_RETRIES = 200
 
+# Reasoning is turned off for models that reason by default so they stay
+# comparable to non-reasoning models (same mapping as src/Agent.py). DeepSeek
+# doesn't accept effort "none" and needs `enabled: false`; Gemini 3.x can't
+# switch thinking off entirely, "minimal" is its lowest level.
+NO_REASONING_MODEL_PREFIXES = ("deepseek",)
+NONE_EFFORT_MODEL_PREFIXES = ("gpt-6", "openai/gpt-6", "mistralai/mistral-small-2603")
+MINIMAL_EFFORT_MODEL_PREFIXES = ("google/gemini-3",)
+
+
+def _extra_body_for_model(model: str) -> dict:
+    if model.lower().startswith(NO_REASONING_MODEL_PREFIXES):
+        return {"reasoning": {"enabled": False}}
+    if model.lower().startswith(NONE_EFFORT_MODEL_PREFIXES):
+        return {"reasoning": {"effort": "none"}}
+    if model.lower().startswith(MINIMAL_EFFORT_MODEL_PREFIXES):
+        return {"reasoning": {"effort": "minimal"}}
+    return {}
+
 # Create response format
 class Response(BaseModel):
     occupations: List[str]
@@ -781,6 +799,7 @@ Please answer in the format I gave you. I will give you the persona now.
         ],
         response_format=Response,
         temperature=1.0,
+        extra_body=_extra_body_for_model(model),
     )
 
     if token_usage is not None and response.usage is not None:
@@ -819,6 +838,7 @@ You may add things that are not in the persona. Do not use emoji. Write as if yo
             {"role": "system", "content": prompt},
         ],
         temperature=1.0,
+        extra_body=_extra_body_for_model(model),
     )
 
     if token_usage is not None and response.usage is not None:

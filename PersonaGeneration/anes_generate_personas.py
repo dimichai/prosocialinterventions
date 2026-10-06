@@ -12,8 +12,9 @@ import argparse
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # The SDK default of 2 retries is not enough to ride out upstream 429s on
-# OpenRouter's shared provider pool. Retries back off exponentially (max 8s).
-LLM_MAX_RETRIES = 10
+# OpenRouter's shared provider pool. Retries back off exponentially up to 8s
+# each, so 200 retries keeps a call waiting for roughly 25 minutes.
+LLM_MAX_RETRIES = 200
 
 # Create response format
 class Response(BaseModel):

@@ -11,6 +11,10 @@ import argparse
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# The SDK default of 2 retries is not enough to ride out upstream 429s on
+# OpenRouter's shared provider pool. Retries back off exponentially (max 8s).
+LLM_MAX_RETRIES = 10
+
 # Create response format
 class Response(BaseModel):
     occupations: List[str]
@@ -906,6 +910,7 @@ def enrich_personas(
     dotenv.load_dotenv(os.path.join(SCRIPT_DIR, '..', '.env'))
     if openrouter_api_key is not None:
         client = openai.OpenAI(
+            max_retries=LLM_MAX_RETRIES,
             base_url="https://openrouter.ai/api/v1",
             api_key=os.getenv(f"OPENROUTER_API_KEY_{openrouter_api_key}"),
         )

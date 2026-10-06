@@ -23,6 +23,10 @@ from analysis.analyse_multiple import gini_coefficient, EI_index, correlations
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../PersonaGeneration'))
 from obfuscation_labels import infer_obfuscation, get_political_figure_labels, get_party_labels, build_group_context
 
+# The SDK default of 2 retries is not enough to ride out upstream 429s on
+# OpenRouter's shared provider pool. Retries back off exponentially (max 8s).
+LLM_MAX_RETRIES = 10
+
 dotenv.load_dotenv()
 
 def compute_metrics(platform, step, cost_input, cost_output, cost_cached, compute_clustering=False):
@@ -269,11 +273,13 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
     model = llm_model
     if openrouter_api_key is not None:
         client = OpenAI(
+            max_retries=LLM_MAX_RETRIES,
             base_url="https://openrouter.ai/api/v1",
             api_key=os.getenv(f"OPENROUTER_API_KEY_{openrouter_api_key}"),
         )
     else:
         client = OpenAI(
+            max_retries=LLM_MAX_RETRIES,
             api_key=os.getenv("OPENAI_API_KEY")
         )
 
@@ -306,11 +312,13 @@ def run_simulation(simulation_size = 500, simulation_steps = 10000,
         if i % 1000 == 0 and i != 0:
             if openrouter_api_key is not None:
                 new_client = OpenAI(
+                    max_retries=LLM_MAX_RETRIES,
                     base_url="https://openrouter.ai/api/v1",
                     api_key=os.getenv(f"OPENROUTER_API_KEY_{openrouter_api_key}"),
                 )
             else:
                 new_client = OpenAI(
+                    max_retries=LLM_MAX_RETRIES,
                     api_key=os.getenv("OPENAI_API_KEY")
                 )
             platform.set_client(new_client)

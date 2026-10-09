@@ -31,16 +31,18 @@ ALL_METRICS = {**NETWORK_METRICS, **CORRELATION_METRICS}
 DEFAULT_WANDB_PROJECT = "persona-simulation"
 
 # obfuscation (config value) -> comparison-plot display label, in a fixed display
-# order: Real > Neutral > RandomReal > Nonce > RandomNonce. (Duplicated from
+# order: Real > Neutral > Unrelated > Nonce. "nonce" and "randomnonce" are two
+# independent sets of nonce strings, so their runs are pooled under one "Nonce"
+# label to average out accidental associations of either set. (Duplicated from
 # persona_interviews_analysis_obfuscation.py's OBFUSCATION_LABELS — small enough
 # that keeping the interview- and simulation-analysis scripts independent of each
 # other outweighs sharing a 5-line dict.)
 OBFUSCATION_LABELS = {
     "none":         "No Obfuscation",
     "neutral":      "Neutral",
-    "randomreal":   "RandomReal",
+    "randomreal":   "Unrelated",
     "nonce":        "Nonce",
-    "randomnonce":  "RandomNonce",
+    "randomnonce":  "Nonce",
 }
 
 CONDITION_PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"]
@@ -60,11 +62,11 @@ def fetch_runs_by_obfuscation(batch_id: str, wandb_project: str) -> dict[str, li
     for run in runs:
         runs_by_obfuscation[run.config["obfuscation"]].append(run)
 
-    return {
-        OBFUSCATION_LABELS[obf]: runs_by_obfuscation[obf]
-        for obf in OBFUSCATION_LABELS
-        if obf in runs_by_obfuscation
-    }
+    runs_by_label = defaultdict(list)
+    for obf, label in OBFUSCATION_LABELS.items():
+        if obf in runs_by_obfuscation:
+            runs_by_label[label] += runs_by_obfuscation[obf]
+    return dict(runs_by_label)
 
 
 PARTIES = ["Democrat", "Republican"]

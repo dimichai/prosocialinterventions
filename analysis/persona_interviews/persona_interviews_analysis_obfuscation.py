@@ -35,13 +35,15 @@ from interview_comparison_plots import (  # noqa: E402
 )
 
 # obfuscation (config value) -> comparison-plot display label, in a fixed display
-# order: Real > Neutral > RandomReal > Nonce > RandomNonce.
+# order: Real > Neutral > Unrelated > Nonce. "nonce" and "randomnonce" are two
+# independent sets of nonce strings, so their runs are pooled under one "Nonce"
+# label to average out accidental associations of either set.
 OBFUSCATION_LABELS = {
     "none":         "No Obfuscation",
     "neutral":      "Neutral",
-    "randomreal":   "RandomReal",
+    "randomreal":   "Unrelated",
     "nonce":        "Nonce",
-    "randomnonce":  "RandomNonce",
+    "randomnonce":  "Nonce",
 }
 
 
@@ -76,8 +78,11 @@ def fetch_condition_dfs(
     dfs = {}
     population = {}
     ground_truth = None
+    runs_by_label: dict[str, list] = defaultdict(list)
     for obfuscation, label in OBFUSCATION_LABELS.items():
-        condition_runs = runs_by_obfuscation.get(obfuscation)
+        runs_by_label[label] += runs_by_obfuscation.get(obfuscation, [])
+
+    for label, condition_runs in runs_by_label.items():
         if not condition_runs:
             continue
         raw_dfs = [interview_wandb.download_results_dataframe(run) for run in condition_runs]
@@ -90,7 +95,7 @@ def fetch_condition_dfs(
         )
         dfs[label] = interview.aggregate_interview_runs(raw_dfs, questions, thermometer_targets)
         population[label] = aggregate_population_metrics(raw_dfs)
-        if obfuscation == "none":
+        if label == OBFUSCATION_LABELS["none"]:
             ground_truth = aggregate_ground_truth_thermometer(raw_dfs)
 
     return dfs, population, ground_truth

@@ -171,8 +171,17 @@ def download_platform(run, cache_dir: Path = PLATFORM_CACHE_DIR):
             raise RuntimeError(f"Run '{run.id}' has no logged platform artifact.")
         artifacts[0].download(root=str(run_dir))
         pkl_files = list(run_dir.glob("*.pkl"))
-    with open(pkl_files[0], "rb") as f:
-        return pickle.load(f)
+    try:
+        with open(pkl_files[0], "rb") as f:
+            return pickle.load(f)
+    except (pickle.UnpicklingError, EOFError):
+        # Truncated cache from an interrupted download — drop it and fetch once more
+        # (a second failure means the artifact itself is bad, so let it raise).
+        if not pkl_files[0].exists():
+            raise
+        print(f"Cached platform for run '{run.id}' is truncated; re-downloading.")
+        pkl_files[0].unlink()
+        return download_platform(run, cache_dir)
 
 
 def modularity_dem_rep(platform) -> float | None:
